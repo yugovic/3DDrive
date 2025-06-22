@@ -393,7 +393,12 @@
         Q: 車高アップ<br>
         E: 車高ダウン<br>
         R: リセット<br>
-        スペース: ターボ（押している間ON）
+        スペース: ターボ（押している間ON）<br>
+        C: 物理デバッグ表示<br>
+        B: 3Dモデル境界表示<br>
+        H: ヘルプ表示切替<br>
+        9: ボディ高さ↑（デバッグ）<br>
+        0: ボディ高さ↓（デバッグ）
     </div>
     <div id="turbo-indicator">TURBO!</div>
     <div id="loading">読み込み中...</div>
@@ -422,19 +427,11 @@
     <script type="module">
         // モジュールのインポート
         import * as CONFIG from './js/config.js';
-        import { SceneManager } from './js/scene.js';
-        import { PhysicsManager } from './js/physics.js';
-        import { InputManager } from './js/input.js';
-        import { UIManager } from './js/ui.js';
+        import { Game } from './js/main.js';
         
         // グローバル変数
         let selectedCar = '';
-        
-        // マネージャーのインスタンス
-        let sceneManager;
-        let physicsManager;
-        let inputManager;
-        let uiManager;
+        let game = null;
         
         // 3Dモデルを管理するクラス
         class CarModelViewer {
@@ -566,6 +563,17 @@
                     prevEl: '.swiper-button-prev',
                 },
                 on: {
+                    init: function () {
+                        // 初期化時に最初のスライドを選択状態にする
+                        const firstSlide = this.slides[0];
+                        const firstOption = firstSlide.querySelector('.car-option');
+                        const firstValue = firstOption.getAttribute('data-value');
+                        
+                        firstOption.classList.add('selected');
+                        carSelect.value = firstValue;
+                        selectedCar = firstValue;
+                        startButton.disabled = false;
+                    },
                     slideChange: function () {
                         const activeSlide = this.slides[this.activeIndex];
                         const carOption = activeSlide.querySelector('.car-option');
@@ -603,112 +611,30 @@
                 carSelectionModal.style.display = 'none';
                 document.getElementById('instructions').style.display = 'block';
                 
-                // メインの3Dシーンを初期化
-                initMainScene();
+                // ゲームを初期化
+                initGame();
             });
         });
         
-        // メインの3Dシーン初期化
-        function initMainScene() {
-            // マネージャーの初期化
-            sceneManager = new SceneManager();
-            physicsManager = new PhysicsManager();
-            inputManager = new InputManager();
-            uiManager = new UIManager();
-            
-            // 各マネージャーを初期化
-            sceneManager.init();
-            physicsManager.init();
-            inputManager.init();
-            uiManager.init();
-            
-            // UIの表示設定
-            uiManager.showInstructions(true);
-            uiManager.showLoading(false);
-            
-            // 物理世界に地面を追加
-            const groundBody = physicsManager.createGroundBody(200, 200);
-            
-            // Three.jsの地面メッシュ
-            const groundGeometry = new THREE.PlaneGeometry(200, 200);
-            const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x3c8f3c });
-            const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-            groundMesh.rotation.x = -Math.PI / 2;
-            groundMesh.receiveShadow = true;
-            sceneManager.scene.add(groundMesh);
-            
-            // グリッドヘルパー
-            const gridHelper = new THREE.GridHelper(100, 50, 0x000000, 0x000000);
-            gridHelper.position.y = 0.01;
-            sceneManager.scene.add(gridHelper);
-            
-            // テスト用の物理ボックス
-            const boxSize = { x: 4, y: 2, z: 8 };
-            const boxBody = physicsManager.createBoxBody(boxSize, 170, { x: 0, y: 5, z: 0 });
-            
-            // Three.jsのボックスメッシュ
-            const boxGeometry = new THREE.BoxGeometry(boxSize.x, boxSize.y, boxSize.z);
-            const boxMaterial = new THREE.MeshPhongMaterial({ color: 0x0066cc });
-            const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-            boxMesh.castShadow = true;
-            sceneManager.scene.add(boxMesh);
-            
-            // 入力コールバックの設定
-            inputManager.setCallback('onReset', () => {
-                // リセット処理
-                boxBody.position.set(0, 5, 0);
-                boxBody.velocity.set(0, 0, 0);
-                boxBody.angularVelocity.set(0, 0, 0);
-                boxBody.quaternion.set(0, 0, 0, 1);
-                uiManager.showMessage('車両をリセットしました');
-            });
-            
-            inputManager.setCallback('onDebugToggle', () => {
-                // デバッグ表示切替
-                const debugMode = !physicsManager.debugMode;
-                physicsManager.setDebugMode(debugMode, sceneManager.scene);
-                uiManager.showDebugInfo(debugMode);
-            });
-            
-            inputManager.setCallback('onHelpToggle', () => {
-                // ヘルプ表示切替
-                const helpVisible = uiManager.elements.instructions.style.display === 'block';
-                uiManager.showInstructions(!helpVisible);
-            });
-            
-            // アニメーションループ
-            let lastTime = performance.now();
-            function animate() {
-                requestAnimationFrame(animate);
+        // ゲーム初期化
+        async function initGame() {
+            try {
+                // 既存のゲームインスタンスがあれば破棄
+                if (game) {
+                    game.dispose();
+                }
                 
-                const currentTime = performance.now();
-                const deltaTime = (currentTime - lastTime) / 1000;
-                lastTime = currentTime;
+                // 新しいゲームインスタンスを作成
+                game = new Game();
                 
-                // 物理シミュレーション更新
-                physicsManager.update(deltaTime);
+                // ゲームを初期化（選択された車種を渡す）
+                await game.init(selectedCar);
                 
-                // メッシュと物理ボディの同期
-                physicsManager.syncMeshWithBody(boxMesh, boxBody);
-                
-                // UI更新
-                const speed = boxBody.velocity.length();
-                uiManager.updateSpeed(speed);
-                
-                // デバッグ情報更新
-                uiManager.updateDebugInfo({
-                    position: boxBody.position,
-                    speed: speed,
-                    fps: 1 / deltaTime,
-                    physics: {
-                        bodies: physicsManager.world.bodies.length
-                    }
-                });
-                
-                // レンダリング
-                sceneManager.render();
+                console.log('ゲームが正常に初期化されました');
+            } catch (error) {
+                console.error('ゲーム初期化エラー:', error);
+                alert('ゲームの初期化に失敗しました。コンソールを確認してください。');
             }
-            animate();
         }
     </script>
 </body>

@@ -78,24 +78,21 @@ export class SceneManager {
     }
 
     updateCameraPosition(target, offset = CONFIG.CAMERA.adjustments) {
-        // カメラの滑らかな追従
-        const idealOffset = new THREE.Vector3(
-            offset.sideOffset,
-            offset.height,
-            offset.distance
+        // 固定方向からのカメラ追従（車の向きに関係なく一定の方向から見る）
+        const targetPosition = new THREE.Vector3().copy(target.position);
+        
+        // カメラの理想位置（ワールド座標系で固定方向）
+        const idealPosition = new THREE.Vector3(
+            targetPosition.x + offset.sideOffset,
+            targetPosition.y + offset.height,
+            targetPosition.z + offset.distance
         );
         
-        // ターゲットの向きに合わせてオフセットを回転
-        idealOffset.applyQuaternion(target.quaternion);
-        idealOffset.add(target.position);
-        
         // カメラ位置を滑らかに更新
-        this.camera.position.lerp(idealOffset, offset.followFactor);
+        this.camera.position.lerp(idealPosition, offset.followFactor);
         
-        // カメラの注視点を更新
-        const lookAtPosition = new THREE.Vector3().copy(target.position);
-        lookAtPosition.y += 2; // 少し上を見る
-        this.camera.lookAt(lookAtPosition);
+        // カメラは常に車両を注視
+        this.camera.lookAt(targetPosition);
     }
 
     dispose() {

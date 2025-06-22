@@ -18,7 +18,9 @@ export class InputManager {
             onHelpToggle: null,
             onHeightAdjust: null,
             onSlopeAdjust: null,
-            onCameraAdjust: null
+            onCameraAdjust: null,
+            onBoundingBoxToggle: null,
+            onBodyHeightAdjust: null
         };
     }
 
@@ -31,6 +33,12 @@ export class InputManager {
     onKeyDown(event) {
         // キーの状態を記録
         this.keys[event.code] = true;
+        
+        // デバッグ用：全キー入力のログ（開発中）
+        console.log(`[Key Debug] 押されたキー: ${event.code} (${event.key})`);
+        if (event.code === 'Digit9' || event.code === 'Digit0') {
+            console.log(`[Key Debug] 9/0キー検出！コード: ${event.code}`);
+        }
 
         // 車両操作の更新
         if (CONFIG.KEY_MAPPINGS[event.code]) {
@@ -59,6 +67,12 @@ export class InputManager {
             case 'KeyC':
                 if (this.callbacks.onDebugToggle) {
                     this.callbacks.onDebugToggle();
+                }
+                break;
+                
+            case 'KeyB':
+                if (this.callbacks.onBoundingBoxToggle) {
+                    this.callbacks.onBoundingBoxToggle();
                 }
                 break;
                 
@@ -126,6 +140,26 @@ export class InputManager {
             case 'Digit6':
                 if (this.callbacks.onCameraAdjust) {
                     this.callbacks.onCameraAdjust('sideOffset', 1);
+                }
+                break;
+                
+            case 'Digit9':
+                console.log('[Input] 9キーが押されました');
+                if (this.callbacks.onBodyHeightAdjust) {
+                    console.log('[Input] onBodyHeightAdjustコールバックを呼び出します（+0.1）');
+                    this.callbacks.onBodyHeightAdjust(0.1); // 10cm上げる
+                } else {
+                    console.warn('[Input] onBodyHeightAdjustコールバックが設定されていません');
+                }
+                break;
+                
+            case 'Digit0':
+                console.log('[Input] 0キーが押されました');
+                if (this.callbacks.onBodyHeightAdjust) {
+                    console.log('[Input] onBodyHeightAdjustコールバックを呼び出します（-0.1）');
+                    this.callbacks.onBodyHeightAdjust(-0.1); // 10cm下げる
+                } else {
+                    console.warn('[Input] onBodyHeightAdjustコールバックが設定されていません');
                 }
                 break;
         }

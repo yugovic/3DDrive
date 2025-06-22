@@ -2,11 +2,11 @@
 
 // 車両パラメータ
 export const VEHICLE = {
-    // シャーシサイズ
+    // シャーシサイズ（3Dモデルに合わせて調整）
     chassis: {
-        depth: 4.29,
-        width: 1.76,
-        height: 0.83
+        depth: 2.8,     // 2.71m + 余裕0.09m
+        width: 1.3,     // 1.22m + 余裕0.08m  
+        height: 0.75    // 0.75m（モデルと同じ）
     },
     mass: 170, // kg（軽量化済み）
     
@@ -14,23 +14,23 @@ export const VEHICLE = {
     wheel: {
         radius: 0.33,
         thickness: 0.25,
-        axisPosition: 1.76 * 0.42, // 車幅の42%位置
+        axisPosition: 1.3 * 0.42, // 車幅の42%位置（新しい車幅に合わせて調整）
         suspensionStiffness: 80,
         suspensionDamping: 13,
         suspensionCompression: 8.2,
-        suspensionRestLength: 0.3,
+        suspensionRestLength: 0.35,  // サスペンションの休止長を適切に設定（車高調整）
         frictionSlip: 50,
         rollInfluence: 0.01,
-        maxSuspensionTravel: 0.3,
+        maxSuspensionTravel: 0.3,    // 最大サスペンショントラベルも調整
         maxSuspensionForce: 200000
     },
     
     // エンジン・ブレーキ設定
     engine: {
-        baseForce: 700, // N（通常時）
-        turboMultiplier: 1500 / 700, // ターボ時の倍率
-        brakeForce: 10,
-        maxSpeed: 25 // m/s (90 km/h)
+        baseForce: 1500, // N（通常時）- 増加
+        turboMultiplier: 3000 / 1500, // ターボ時の倍率
+        brakeForce: 20,
+        maxSpeed: 30 // m/s (108 km/h)
     },
     
     // ステアリング設定
@@ -95,12 +95,12 @@ export const CAMERA = {
     fov: 50,
     near: 0.1,
     far: 1000,
-    initialPosition: { x: -8.0, y: 11.9, z: 9.5 },
+    initialPosition: { x: -15, y: 15, z: 15 },
     adjustments: {
-        distance: 10,
-        height: 10,
-        sideOffset: 10,
-        followFactor: 0.1
+        distance: 15,      // 車両後方からの距離
+        height: 10,        // 車両上方からの高さ
+        sideOffset: 0,     // 横方向のオフセット（0で真後ろ）
+        followFactor: 0.1  // 追従の滑らかさ
     }
 };
 
@@ -180,6 +180,6 @@ export const CAR_MODELS = {
 export const DEFAULTS = {
     carModel: 'rx7',
     debugMode: true,
-    initialPosition: { x: 0, y: 2, z: 10 },
+    initialPosition: { x: 0, y: 2.1, z: 10 },  // 初期位置を調整（10cm上げた）
     initialQuaternion: { x: 0, y: 0, z: 0, w: 1 }
 };

@@ -1,12 +1,159 @@
 // Cannon.js物理エンジン管理モジュール
 import * as CONFIG from './config.js';
 
+// Cannon.jsデバッグレンダラークラス
+class CannonDebugRenderer {
+    constructor(scene, world) {
+        this.scene = scene;
+        this.world = world;
+        this.meshes = [];
+        this.material = new THREE.LineBasicMaterial({ 
+            color: 0x00ff00,
+            linewidth: 1,
+            opacity: 0.7,
+            transparent: true
+        });
+    }
+
+    update() {
+        // 既存のデバッグメッシュをクリア
+        this.clear();
+
+        // 各物理ボディに対してワイヤーフレームを作成
+        this.world.bodies.forEach(body => {
+            body.shapes.forEach((shape, shapeIndex) => {
+                const mesh = this.createMeshForShape(shape, body, shapeIndex);
+                if (mesh) {
+                    this.scene.add(mesh);
+                    this.meshes.push(mesh);
+                }
+            });
+        });
+    }
+
+    createMeshForShape(shape, body, shapeIndex) {
+        let geometry = null;
+        const shapeWorldPos = new CANNON.Vec3();
+        const shapeWorldQuat = new CANNON.Quaternion();
+        body.pointToWorldFrame(shape.position || new CANNON.Vec3(), shapeWorldPos);
+        body.quaternion.mult(shape.orientation || new CANNON.Quaternion(), shapeWorldQuat);
+
+        if (shape instanceof CANNON.Box) {
+            // ボックス形状
+            const halfExtents = shape.halfExtents;
+            geometry = new THREE.BoxGeometry(
+                halfExtents.x * 2,
+                halfExtents.y * 2,
+                halfExtents.z * 2
+            );
+        } else if (shape instanceof CANNON.Sphere) {
+            // 球形状
+            geometry = new THREE.SphereGeometry(shape.radius, 8, 6);
+        } else if (shape instanceof CANNON.Plane) {
+            // 平面形状
+            geometry = new THREE.PlaneGeometry(100, 100, 10, 10);
+        } else if (shape instanceof CANNON.ConvexPolyhedron) {
+            // 凸多面体形状
+            const vertices = [];
+            const indices = [];
+            
+            // 頂点を追加
+            shape.vertices.forEach(v => {
+                vertices.push(v.x, v.y, v.z);
+            });
+            
+            // 面のインデックスを追加
+            shape.faces.forEach(face => {
+                // face が配列でない場合は処理をスキップ
+                if (!Array.isArray(face) || face.length < 3) {
+                    console.warn('Invalid face data:', face);
+                    return;
+                }
+                const faceVertices = face.map(i => i);
+                for (let i = 1; i < faceVertices.length - 1; i++) {
+                    indices.push(faceVertices[0], faceVertices[i], faceVertices[i + 1]);
+                }
+            });
+            
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setIndex(indices);
+        } else if (shape instanceof CANNON.Heightfield) {
+            // ハイトフィールド形状（地形用）
+            const data = shape.data;
+            const elementSize = shape.elementSize;
+            const vertices = [];
+            const indices = [];
+            
+            // グリッドポイントを作成
+            for (let i = 0; i < data.length; i++) {
+                for (let j = 0; j < data[i].length; j++) {
+                    vertices.push(
+                        (i - data.length / 2) * elementSize,
+                        data[i][j],
+                        (j - data[i].length / 2) * elementSize
+                    );
+                }
+            }
+            
+            // グリッドのインデックスを作成
+            for (let i = 0; i < data.length - 1; i++) {
+                for (let j = 0; j < data[i].length - 1; j++) {
+                    const a = i * data[i].length + j;
+                    const b = a + 1;
+                    const c = (i + 1) * data[i].length + j;
+                    const d = c + 1;
+                    
+                    indices.push(a, b, c);
+                    indices.push(b, d, c);
+                }
+            }
+            
+            geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setIndex(indices);
+        }
+
+        if (geometry) {
+            const edges = new THREE.EdgesGeometry(geometry);
+            const mesh = new THREE.LineSegments(edges, this.material);
+            
+            // 位置と回転を設定
+            mesh.position.copy(shapeWorldPos);
+            mesh.quaternion.set(
+                shapeWorldQuat.x,
+                shapeWorldQuat.y,
+                shapeWorldQuat.z,
+                shapeWorldQuat.w
+            );
+            
+            return mesh;
+        }
+        
+        return null;
+    }
+
+    clear() {
+        this.meshes.forEach(mesh => {
+            this.scene.remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+        });
+        this.meshes = [];
+    }
+
+    dispose() {
+        this.clear();
+        if (this.material) this.material.dispose();
+    }
+}
+
 export class PhysicsManager {
     constructor() {
         this.world = null;
         this.materials = {};
         this.debugMode = false;
         this.debugMeshes = [];
+        this.debugRenderer = null;
     }
 
     init() {
@@ -56,7 +203,13 @@ export class PhysicsManager {
 
     update(deltaTime) {
         if (this.world) {
-            this.world.step(deltaTime);
+            try {
+                this.world.step(deltaTime);
+            } catch (error) {
+                console.error('Cannon.js stepエラー:', error);
+                console.error('エラースタック:', error.stack);
+                // エラーが発生した場合でも継続する
+            }
         }
         
         // デバッグ表示の更新
@@ -76,18 +229,27 @@ export class PhysicsManager {
     setDebugMode(enabled, scene) {
         this.debugMode = enabled;
         
-        if (!enabled) {
-            // デバッグメッシュを削除
-            this.clearDebugVisuals(scene);
+        if (enabled && !this.debugRenderer) {
+            // デバッグレンダラーを作成
+            this.debugRenderer = new CannonDebugRenderer(scene, this.world);
+        } else if (!enabled && this.debugRenderer) {
+            // デバッグレンダラーを破棄
+            this.debugRenderer.dispose();
+            this.debugRenderer = null;
         }
     }
 
     updateDebugVisuals() {
-        // デバッグ用の物理ボディの可視化更新
-        // 実装は後で必要に応じて追加
+        // デバッグレンダラーの更新
+        if (this.debugRenderer) {
+            this.debugRenderer.update();
+        }
     }
 
     clearDebugVisuals(scene) {
+        if (this.debugRenderer) {
+            this.debugRenderer.clear();
+        }
         this.debugMeshes.forEach(mesh => {
             scene.remove(mesh);
             if (mesh.geometry) mesh.geometry.dispose();
@@ -137,6 +299,12 @@ export class PhysicsManager {
     }
 
     dispose() {
+        // デバッグレンダラーのクリーンアップ
+        if (this.debugRenderer) {
+            this.debugRenderer.dispose();
+            this.debugRenderer = null;
+        }
+        
         // 物理世界のクリーンアップ
         if (this.world) {
             // すべてのボディを削除

@@ -14,8 +14,13 @@ export class VehicleManager {
         
         this.modelPath = null;
         this.carModel = null;
+        this.boundingBoxHelper = null;
         
         this.stabilizationEnabled = true;
+        this.showBoundingBox = true; // デフォルトで表示
+        this.heightOffset = 0; // デバッグ用の高さオフセット
+        this.debugClearance = -0.15; // デバッグ用の車高調整値（タイヤを下げて地面に接地）
+        this.modelYOffset = -0.2; // 3Dモデルの表示オフセット（コリジョンオフセットと同じ値）
     }
 
     async loadModel(modelPath) {
@@ -60,9 +65,19 @@ export class VehicleManager {
         ));
         
         this.chassisBody = new CANNON.Body({
-            mass: CONFIG.VEHICLE.mass,
-            shape: chassisShape
+            mass: CONFIG.VEHICLE.mass
         });
+        
+        // コリジョンボックスを上にオフセットして追加（底面を上げる）
+        const collisionOffset = 0.2; // 20cm上にオフセット
+        this.chassisBody.addShape(chassisShape, new CANNON.Vec3(0, collisionOffset, 0));
+        
+        console.log('=== 車両物理設定 ===');
+        console.log(`コリジョンボックスオフセット: ${collisionOffset}m（上方向）`);
+        console.log(`3Dモデル表示オフセット: ${this.modelYOffset}m（下方向）`);
+        console.log(`初期クリアランス: ${this.debugClearance}m`);
+        console.log('==================');
+        
         this.chassisBody.position.set(position.x, position.y, position.z);
         this.physicsManager.addBody(this.chassisBody);
 
@@ -78,6 +93,27 @@ export class VehicleManager {
                 CONFIG.VEHICLE.chassis.depth / size.z
             );
             this.carModel.scale.multiplyScalar(scaleFactor * 0.9);
+            
+            // 3Dモデルの実際のバウンディングボックスをデバッグ表示
+            const finalBox = new THREE.Box3().setFromObject(this.carModel);
+            const finalSize = finalBox.getSize(new THREE.Vector3());
+            console.log('3Dモデル実寸:', {
+                width: finalSize.x,
+                height: finalSize.y, 
+                depth: finalSize.z,
+                minY: finalBox.min.y,
+                maxY: finalBox.max.y
+            });
+            console.log('コリジョンボックス:', {
+                width: CONFIG.VEHICLE.chassis.width,
+                height: CONFIG.VEHICLE.chassis.height,
+                depth: CONFIG.VEHICLE.chassis.depth
+            });
+            
+            // バウンディングボックスヘルパーを作成（赤色で表示）
+            this.boundingBoxHelper = new THREE.Box3Helper(finalBox, 0xff0000);
+            this.boundingBoxHelper.visible = this.showBoundingBox;
+            this.sceneManager.scene.add(this.boundingBoxHelper);
         } else {
             // デフォルトのボックスメッシュ
             const chassisGeometry = new THREE.BoxGeometry(
@@ -94,18 +130,22 @@ export class VehicleManager {
         this.sceneManager.scene.add(this.chassisMesh);
 
         // RaycastVehicleの作成
+        console.log('RaycastVehicle作成中...');
         this.vehicle = new CANNON.RaycastVehicle({
             chassisBody: this.chassisBody,
-            indexRightAxis: 0,
-            indexForwardAxis: 2,
-            indexUpAxis: 1
+            indexRightAxis: 0,  // X軸が右
+            indexForwardAxis: 2, // Z軸が前
+            indexUpAxis: 1      // Y軸が上
         });
 
         // ホイールの追加
+        console.log('ホイール追加中...');
         this.addWheels();
 
         // 車両を物理世界に追加
+        console.log('車両を物理世界に追加中...');
         this.vehicle.addToWorld(this.physicsManager.world);
+        console.log('車両作成完了');
 
         return this.vehicle;
     }
@@ -128,12 +168,17 @@ export class VehicleManager {
             useCustomSlidingRotationalSpeed: true
         };
 
-        // ホイール位置の定義
+        // ホイール位置の定義（タイヤが地面に接地するよう調整）
+        // コリジョンボックスと3Dモデルの差を考慮して、少し余裕を持たせる
+        const chassisHalfHeight = CONFIG.VEHICLE.chassis.height / 2;
+        // タイヤがコリジョンボックスより少し上になるように調整（デバッグ可能）
+        const wheelY = -chassisHalfHeight + CONFIG.VEHICLE.wheel.suspensionRestLength + CONFIG.VEHICLE.wheel.radius + this.debugClearance;
+        
         const wheelPositions = [
-            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: 0, z: CONFIG.VEHICLE.chassis.depth * 0.35 },  // 前左
-            { x: CONFIG.VEHICLE.wheel.axisPosition, y: 0, z: CONFIG.VEHICLE.chassis.depth * 0.35 },   // 前右
-            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: 0, z: -CONFIG.VEHICLE.chassis.depth * 0.35 }, // 後左
-            { x: CONFIG.VEHICLE.wheel.axisPosition, y: 0, z: -CONFIG.VEHICLE.chassis.depth * 0.35 }   // 後右
+            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: CONFIG.VEHICLE.chassis.depth * 0.35 },  // 前左
+            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: CONFIG.VEHICLE.chassis.depth * 0.35 },   // 前右
+            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -CONFIG.VEHICLE.chassis.depth * 0.35 }, // 後左
+            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -CONFIG.VEHICLE.chassis.depth * 0.35 }   // 後右
         ];
 
         wheelPositions.forEach((pos, index) => {
@@ -156,7 +201,7 @@ export class VehicleManager {
             const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheelMesh.castShadow = true;
             wheelMesh.receiveShadow = true;
-            wheelMesh.rotation.z = Math.PI / 2;
+            wheelMesh.visible = false; // タイヤを非表示
             
             this.wheelMeshes.push(wheelMesh);
             this.sceneManager.scene.add(wheelMesh);
@@ -164,6 +209,10 @@ export class VehicleManager {
 
         // ホイールボディの作成
         this.vehicle.wheelInfos.forEach((wheel) => {
+            // RaycastVehicleは内部でホイール管理を行うため、
+            // 別途ホイールボディを作成する必要はない
+            // この部分はコメントアウトしてエラーを回避
+            /*
             const cylinderShape = new CANNON.Cylinder(
                 CONFIG.VEHICLE.wheel.radius,
                 CONFIG.VEHICLE.wheel.radius,
@@ -181,6 +230,7 @@ export class VehicleManager {
             
             wheelBody.addShape(cylinderShape);
             this.wheelBodies.push(wheelBody);
+            */
         });
     }
 
@@ -190,11 +240,23 @@ export class VehicleManager {
         // エンジン力の計算
         let engineForce = 0;
         if (inputActions.acceleration) {
+            // 前進
             engineForce = inputActions.turbo ? 
-                CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.turboMultiplier : 
-                CONFIG.VEHICLE.engine.baseForce;
-        } else if (inputActions.braking) {
-            engineForce = -CONFIG.VEHICLE.engine.baseForce * 0.5;
+                -CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.turboMultiplier : 
+                -CONFIG.VEHICLE.engine.baseForce;
+        }
+        
+        // ブレーキ力（別途処理）
+        let brakeForce = 0;
+        if (inputActions.braking) {
+            const currentSpeed = this.chassisBody.velocity.length();
+            if (currentSpeed < 1.0) {
+                // 低速時はバック（より強い力で）
+                engineForce = CONFIG.VEHICLE.engine.baseForce * 0.8;
+            } else {
+                // 走行中はブレーキ
+                brakeForce = CONFIG.VEHICLE.engine.brakeForce;
+            }
         }
 
         // 速度に応じたエンジン出力の調整
@@ -213,11 +275,7 @@ export class VehicleManager {
             engineForce = 0;
         }
 
-        // ブレーキ力
-        let brakeForce = 0;
-        if (inputActions.braking && !inputActions.acceleration) {
-            brakeForce = CONFIG.VEHICLE.engine.brakeForce;
-        }
+        // ハンドブレーキの処理
         if (inputActions.handbrake) {
             brakeForce = CONFIG.VEHICLE.engine.brakeForce * 2;
         }
@@ -237,7 +295,9 @@ export class VehicleManager {
             steering *= steerFactor;
         }
 
-        // 車両の制御を適用
+        // 車両の制御を適用（4輪駆動）
+        this.vehicle.applyEngineForce(engineForce, 0); // 前左輪
+        this.vehicle.applyEngineForce(engineForce, 1); // 前右輪
         this.vehicle.applyEngineForce(engineForce, 2); // 後左輪
         this.vehicle.applyEngineForce(engineForce, 3); // 後右輪
 
@@ -256,6 +316,9 @@ export class VehicleManager {
 
         // ホイールメッシュの更新
         this.updateWheelMeshes();
+        
+        // バウンディングボックスの更新
+        this.updateBoundingBox();
     }
 
     applyStabilization() {
@@ -297,13 +360,30 @@ export class VehicleManager {
             
             wheelMesh.position.copy(transform.position);
             wheelMesh.quaternion.copy(transform.quaternion);
+            
+            // タイヤを正しい向きに回転（Y軸を車軸に）
+            const rotation = new THREE.Euler();
+            rotation.setFromQuaternion(wheelMesh.quaternion);
+            rotation.z += Math.PI / 2;
+            wheelMesh.rotation.copy(rotation);
         }
     }
 
     syncMeshWithBody() {
         if (this.chassisMesh && this.chassisBody) {
+            // 物理ボディの位置をコピー
             this.chassisMesh.position.copy(this.chassisBody.position);
+            // 3Dモデルを下にオフセット（コリジョンボックスが上にオフセットされているため）
+            this.chassisMesh.position.y += this.modelYOffset;
             this.chassisMesh.quaternion.copy(this.chassisBody.quaternion);
+        }
+    }
+    
+    updateBoundingBox() {
+        if (this.boundingBoxHelper && this.chassisMesh && this.showBoundingBox) {
+            // 車両の現在位置でバウンディングボックスを再計算
+            const box = new THREE.Box3().setFromObject(this.chassisMesh);
+            this.boundingBoxHelper.box = box;
         }
     }
 
@@ -322,6 +402,46 @@ export class VehicleManager {
 
     getPosition() {
         return this.chassisBody ? this.chassisBody.position : new CANNON.Vec3();
+    }
+
+    adjustHeight(delta) {
+        this.debugClearance += delta;
+        
+        console.log('=== 車両高さ調整（クリアランス方式） ===');
+        console.log(`調整量: ${delta > 0 ? '+' : ''}${delta}m`);
+        console.log(`新しいクリアランス値: ${this.debugClearance.toFixed(3)}m`);
+        
+        if (this.vehicle && this.chassisBody) {
+            // 現在の位置と速度を保存
+            const currentPos = this.chassisBody.position.clone();
+            const currentVel = this.chassisBody.velocity.clone();
+            const currentAngVel = this.chassisBody.angularVelocity.clone();
+            const currentQuat = this.chassisBody.quaternion.clone();
+            
+            // ホイールの接続点を再計算
+            const chassisHalfHeight = CONFIG.VEHICLE.chassis.height / 2;
+            const newWheelY = -chassisHalfHeight + CONFIG.VEHICLE.wheel.suspensionRestLength + CONFIG.VEHICLE.wheel.radius + this.debugClearance;
+            
+            // 全てのホイールの接続点を更新
+            this.vehicle.wheelInfos.forEach((wheelInfo, index) => {
+                const oldY = wheelInfo.chassisConnectionPointLocal.y;
+                wheelInfo.chassisConnectionPointLocal.y = newWheelY;
+                console.log(`ホイール${index + 1} Y座標: ${oldY.toFixed(3)}m → ${newWheelY.toFixed(3)}m`);
+            });
+            
+            // サスペンションをリセット
+            this.vehicle.wheelInfos.forEach((wheelInfo) => {
+                wheelInfo.suspensionLength = 0;
+                wheelInfo.suspensionRelativeVelocity = 0;
+                wheelInfo.suspensionForce = 0;
+                wheelInfo.deltaRotation = 0;
+            });
+            
+            console.log(`実効的な車高変化: ${(newWheelY + chassisHalfHeight).toFixed(3)}m`);
+            console.log('==================');
+        }
+        
+        return this.debugClearance;
     }
 
     dispose() {

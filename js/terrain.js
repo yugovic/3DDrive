@@ -53,8 +53,8 @@ export class TerrainManager {
     }
 
     createWalls() {
-        const wallThickness = 1;
-        const wallHeight = 5;
+        const wallThickness = 2;
+        const wallHeight = 10;
         const wallLength = 100;
         
         // 壁の設定
