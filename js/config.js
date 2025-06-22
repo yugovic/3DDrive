@@ -8,7 +8,7 @@ export const VEHICLE = {
         width: 1.3,     // 1.22m + 余裕0.08m  
         height: 0.75    // 0.75m（モデルと同じ）
     },
-    mass: 170, // kg（軽量化済み）
+    mass: 1200, // kg（より現実的な車重に増加）
     
     // ホイール設定
     wheel: {
@@ -27,10 +27,11 @@ export const VEHICLE = {
     
     // エンジン・ブレーキ設定
     engine: {
-        baseForce: 1500, // N（通常時）- 増加
-        turboMultiplier: 3000 / 1500, // ターボ時の倍率
-        brakeForce: 20,
-        maxSpeed: 30 // m/s (108 km/h)
+        baseForce: 1500, // N（通常時）
+        turboMultiplier: 3000 / 1500, // ターボ時の倍率（2倍）
+        brakeForce: 50, // ブレーキ力を強化（20→50）
+        maxSpeed: 25, // m/s (90 km/h) - より現実的な最高速度
+        reverseMultiplier: 1.0 // バック時の力の倍率（前進と同じ1500N）
     },
     
     // ステアリング設定
@@ -43,9 +44,9 @@ export const VEHICLE = {
     
     // エンジン出力調整
     engineForce: {
-        highSpeedThreshold: 30,
-        minFactorAtHighSpeed: 0.2,
-        reductionSpeedRange: 50
+        highSpeedThreshold: 15, // より低速から出力調整開始
+        minFactorAtHighSpeed: 0.3, // 高速時の最小出力係数（30%）
+        reductionSpeedRange: 10 // 出力減少の速度範囲
     },
     
     // 安定化設定
@@ -137,10 +138,10 @@ export const UI = {
 
 // キーマッピング
 export const KEY_MAPPINGS = {
-    "KeyW": "acceleration",
-    "ArrowUp": "acceleration",
-    "KeyS": "braking",
-    "ArrowDown": "braking",
+    "KeyW": "braking",        // W = 後退/ブレーキ
+    "ArrowUp": "braking",     // ↑ = 後退/ブレーキ
+    "KeyS": "acceleration",   // S = 前進
+    "ArrowDown": "acceleration", // ↓ = 前進
     "KeyA": "left",
     "ArrowLeft": "left",
     "KeyD": "right",
@@ -181,5 +182,6 @@ export const DEFAULTS = {
     carModel: 'rx7',
     debugMode: true,
     initialPosition: { x: 0, y: 2.1, z: 10 },  // 初期位置を調整（10cm上げた）
-    initialQuaternion: { x: 0, y: 0, z: 0, w: 1 }
+    // Y軸周りに-90度回転させて、Z軸の負方向を前にする
+    initialQuaternion: { x: 0, y: -0.707, z: 0, w: 0.707 }
 };

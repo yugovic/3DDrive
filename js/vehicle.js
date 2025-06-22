@@ -21,6 +21,7 @@ export class VehicleManager {
         this.heightOffset = 0; // デバッグ用の高さオフセット
         this.debugClearance = -0.15; // デバッグ用の車高調整値（タイヤを下げて地面に接地）
         this.modelYOffset = -0.2; // 3Dモデルの表示オフセット（コリジョンオフセットと同じ値）
+        this.reversingState = false; // バック走行状態を記憶
     }
 
     async loadModel(modelPath) {
@@ -165,7 +166,10 @@ export class VehicleManager {
             chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
             maxSuspensionTravel: CONFIG.VEHICLE.wheel.maxSuspensionTravel,
             customSlidingRotationalSpeed: -30,
-            useCustomSlidingRotationalSpeed: true
+            useCustomSlidingRotationalSpeed: true,
+            // バック走行を改善する設定
+            sideAcceleration: 10, // 横方向の加速を増加
+            forwardAcceleration: 1.5 // 前後方向の加速を追加
         };
 
         // ホイール位置の定義（タイヤが地面に接地するよう調整）
@@ -238,24 +242,83 @@ export class VehicleManager {
         if (!this.vehicle) return;
 
         // エンジン力の計算
+        // テスト：エンジン力の符号を逆にしてみる
         let engineForce = 0;
         if (inputActions.acceleration) {
-            // 前進
+            // 前進（正の値で前進を試す）
             engineForce = inputActions.turbo ? 
-                -CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.turboMultiplier : 
-                -CONFIG.VEHICLE.engine.baseForce;
+                CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.turboMultiplier : 
+                CONFIG.VEHICLE.engine.baseForce;
         }
         
         // ブレーキ力（別途処理）
         let brakeForce = 0;
+        let isReversing = false; // バック走行フラグ
+        
         if (inputActions.braking) {
             const currentSpeed = this.chassisBody.velocity.length();
-            if (currentSpeed < 1.0) {
-                // 低速時はバック（より強い力で）
-                engineForce = CONFIG.VEHICLE.engine.baseForce * 0.8;
-            } else {
-                // 走行中はブレーキ
+            const velocity = this.chassisBody.velocity;
+            // 車両の前方向ベクトル（ローカル座標系でZ軸の負方向）
+            const forwardVector = new CANNON.Vec3(0, 0, -1);
+            // 車両の回転を適用してワールド座標系に変換
+            this.chassisBody.quaternion.vmult(forwardVector, forwardVector);
+            // 速度と前方向の内積（正=前進、負=後退）
+            const forwardSpeed = velocity.dot(forwardVector);
+            
+            // デバッグ：ベクトルの詳細
+            console.log(`[ベクトル解析] 速度: (${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)}, ${velocity.z.toFixed(2)})`);
+            console.log(`[ベクトル解析] 前方向: (${forwardVector.x.toFixed(2)}, ${forwardVector.y.toFixed(2)}, ${forwardVector.z.toFixed(2)})`);
+            console.log(`[ベクトル解析] 内積(forwardSpeed): ${forwardSpeed.toFixed(3)}`);
+            
+            // バック/ブレーキの判定
+            console.log(`[速度判定] 前方向速度: ${forwardSpeed.toFixed(3)} m/s, 現在速度: ${currentSpeed.toFixed(3)} m/s`);
+            
+            // より単純なアプローチ：前進速度に基づいて判定
+            if (forwardSpeed > 0.05) {
+                // 前進中 → ブレーキ
                 brakeForce = CONFIG.VEHICLE.engine.brakeForce;
+                engineForce = 0;
+                console.log(`[ブレーキ] 前進速度: ${forwardSpeed.toFixed(2)} m/s`);
+            } else if (forwardSpeed > -0.05) {
+                // ほぼ停止 → バック力（負の値で後退）
+                isReversing = true;
+                engineForce = -CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.reverseMultiplier;
+                brakeForce = 0;
+                console.log(`[バック開始] エンジン力: ${engineForce}N`);
+            } else {
+                // 後退中 → バック力を維持（負の値で後退）
+                isReversing = true;
+                engineForce = -CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.reverseMultiplier;
+                brakeForce = 0;
+                console.log(`[バック中] 後退速度: ${Math.abs(forwardSpeed).toFixed(2)} m/s`);
+                
+                // デバッグ情報
+                console.log('=== バック走行デバッグ ===');
+                console.log(`速度: ${currentSpeed.toFixed(3)} m/s`);
+                console.log(`前方向速度: ${forwardSpeed.toFixed(3)} m/s (負=後退中)`);
+                console.log(`速度ベクトル: x=${velocity.x.toFixed(2)}, y=${velocity.y.toFixed(2)}, z=${velocity.z.toFixed(2)}`);
+                console.log(`適用する力: ${engineForce} N (正の値でバック)`);
+                
+                // 各ホイールの状態を確認
+                this.vehicle.wheelInfos.forEach((wheel, index) => {
+                    console.log(`ホイール${index + 1}: 接地=${wheel.isInContact}, サスペンション長=${wheel.suspensionLength?.toFixed(3) || 'N/A'}`);
+                });
+                
+                // 抵抗要因の確認
+                console.log(`車体の線形減衰: ${this.chassisBody.linearDamping}`);
+                console.log(`地面との摩擦: ${CONFIG.VEHICLE.wheel.frictionSlip}`);
+                
+                // 追加デバッグ：力の確認
+                console.log(`車体にかかる合力: x=${this.chassisBody.force.x.toFixed(2)}, y=${this.chassisBody.force.y.toFixed(2)}, z=${this.chassisBody.force.z.toFixed(2)}`);
+                console.log(`角速度: x=${this.chassisBody.angularVelocity.x.toFixed(2)}, y=${this.chassisBody.angularVelocity.y.toFixed(2)}, z=${this.chassisBody.angularVelocity.z.toFixed(2)}`);
+                
+                // 各ホイールの駆動力を確認
+                this.vehicle.wheelInfos.forEach((wheel, index) => {
+                    if (wheel.engineForce !== undefined) {
+                        console.log(`ホイール${index + 1}の駆動力: ${wheel.engineForce}N`);
+                    }
+                });
+                console.log('==================');
             }
         }
 
@@ -296,15 +359,49 @@ export class VehicleManager {
         }
 
         // 車両の制御を適用（4輪駆動）
+        console.log(`[エンジン適用前] 設定するエンジン力: ${engineForce}N`);
         this.vehicle.applyEngineForce(engineForce, 0); // 前左輪
         this.vehicle.applyEngineForce(engineForce, 1); // 前右輪
         this.vehicle.applyEngineForce(engineForce, 2); // 後左輪
         this.vehicle.applyEngineForce(engineForce, 3); // 後右輪
-
-        this.vehicle.setBrake(brakeForce, 0);
-        this.vehicle.setBrake(brakeForce, 1);
-        this.vehicle.setBrake(brakeForce, 2);
-        this.vehicle.setBrake(brakeForce, 3);
+        
+        // 適用後の確認
+        console.log(`[エンジン適用後] ホイール0: ${this.vehicle.wheelInfos[0].engineForce}N`);
+        console.log(`[エンジン適用後] ホイール1: ${this.vehicle.wheelInfos[1].engineForce}N`);
+        console.log(`[エンジン適用後] ホイール2: ${this.vehicle.wheelInfos[2].engineForce}N`);
+        console.log(`[エンジン適用後] ホイール3: ${this.vehicle.wheelInfos[3].engineForce}N`);
+        
+        // バック時は線形減衰を減らして加速しやすくする
+        if (isReversing) {
+            this.chassisBody.linearDamping = 0.0001; // バック時は減衰を極限まで減らす
+            this.chassisBody.angularDamping = 0.01; // 回転減衰も減らす
+        } else {
+            this.chassisBody.linearDamping = 0.01; // 通常時の減衰
+            this.chassisBody.angularDamping = 0.01; // 通常時の回転減衰
+        }
+        
+        // ブレーキの適用（バック時は完全にブレーキを解除）
+        const actualBrakeForce = isReversing ? 0 : brakeForce;
+        
+        // バック時は追加の推進力を車体に直接加える（物理的な補助）
+        if (isReversing && engineForce > 0) {
+            // 車両の向きに基づいて後方への力を計算
+            const backwardForce = new CANNON.Vec3(0, 0, engineForce * 0.5); // エンジン力の50%を追加
+            this.chassisBody.quaternion.vmult(backwardForce, backwardForce);
+            this.chassisBody.applyLocalForce(backwardForce, new CANNON.Vec3(0, 0, 0));
+        }
+        
+        // 力の適用状態をデバッグ
+        if (engineForce !== 0 || actualBrakeForce !== 0) {
+            const forceType = isReversing ? 'バック' : (engineForce < 0 ? '前進' : 'ブレーキ');
+            console.log(`[${forceType}] エンジン力: ${engineForce}N, 実ブレーキ力: ${actualBrakeForce}N, 減衰: ${this.chassisBody.linearDamping}`);
+        }
+        
+        // ブレーキを各ホイールに適用
+        this.vehicle.setBrake(actualBrakeForce, 0);
+        this.vehicle.setBrake(actualBrakeForce, 1);
+        this.vehicle.setBrake(actualBrakeForce, 2);
+        this.vehicle.setBrake(actualBrakeForce, 3);
 
         this.vehicle.setSteeringValue(steering, 0);
         this.vehicle.setSteeringValue(steering, 1);
