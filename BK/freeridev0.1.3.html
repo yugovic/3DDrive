@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js & Cannon.js RaycastVehicle (Behavior Tuned)</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        操作方法:<br>
+        W / ↑: アクセル<br>
+        S / ↓: ブレーキ / バック<br>
+        A / ←: 左ステアリング<br>
+        D / →: 右ステアリング<br>
+        R: リセット
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let world, vehicle, chassisBody, groundBody;
+        let carMesh, groundMesh;
+        const wheelMeshes = [];
+
+        // 車両基本パラメータ
+        const chassisWidth = 1.9;
+        const chassisHeight = 0.7;
+        const chassisDepth = 4.2;
+        const massVehicle = 200; // 質量を少し増加
+
+        const wheelAxisPosition = 0.85;
+        const wheelRadius = 0.38;
+        const wheelThickness = 0.35;
+        const wheelSegments = 16;
+
+        // 操作関連
+        const keysActions = {
+            "KeyW": "acceleration", "ArrowUp": "acceleration",
+            "KeyS": "braking", "ArrowDown": "braking",
+            "KeyA": "left", "ArrowLeft": "left",
+            "KeyD": "right", "ArrowRight": "right"
+        };
+        const vehicleSteeringState = { // 変数名を変更 (vehicleSteering -> vehicleSteeringState)
+            acceleration: false,
+            braking: false,
+            left: false,
+            right: false
+        };
+
+        // 挙動チューニング用パラメータ
+        let baseMaxSteerVal = 0.6;    // 基本の最大操舵角 (ラジアン)
+        let engineBaseForce = 900;    // 基本のエンジン力
+        let brakeForce = 25;
+        
+        // 速度感応パラメータ
+        const steerHighSpeedThreshold = 8;  // m/s (この速度から操舵角を絞り始める)
+        const steerMinFactorAt palvelu = 0.2; // 高速時の操舵角の最小係数 (例: 0.2なら基本の20%)
+        const steerReductionSpeedRange = 15; // 操舵角を絞り切るまでの速度変化幅 (thresholdからの差)
+
+        const forceHighSpeedThreshold = 6; // m/s (この速度からエンジン力を絞り始める)
+        const forceMinFactorAtHighSpeed = 0.1; // 高速時のエンジン力の最小係数
+        const forceReductionSpeedRange = 20;  // エンジン力を絞り切るまでの速度変化幅
+
+        const initialPosition = new CANNON.Vec3(0, 5, 0);
+        const initialQuaternion = new CANNON.Quaternion(0, 0, 0, 1);
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(8, 7, 9);
+            camera.lookAt(0, 1, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight.position.set(15, 25, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048; // 影の解像度を上げる
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+            // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera); // デバッグ用
+            // scene.add(shadowHelper);
+
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            world.solver.iterations = 15; // ソルバーの反復回数を増やす
+            world.defaultContactMaterial.friction = 0.2; // 全体的な摩擦は低めにして、ホイールで調整
+
+            createGround();
+            createVehicle();
+
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+
+            animate();
+        }
+
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(100, 100);
+            const groundMaterialThree = new THREE.MeshPhongMaterial({ color: 0x666666, side: THREE.DoubleSide });
+            groundMesh = new THREE.Mesh(groundGeometry, groundMaterialThree);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+
+            const groundMaterialCannon = new CANNON.Material("ground");
+            groundBody = new CANNON.Body({ mass: 0, material: groundMaterialCannon });
+            groundBody.addShape(new CANNON.Plane());
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+        }
+
+        function createVehicle() {
+            const chassisMaterialCannon = new CANNON.Material("chassis");
+            chassisBody = new CANNON.Body({ mass: massVehicle, material: chassisMaterialCannon });
+            const chassisShape = new CANNON.Box(new CANNON.Vec3(chassisDepth / 2, chassisHeight / 2, chassisWidth / 2));
+            chassisBody.addShape(chassisShape);
+            chassisBody.position.copy(initialPosition);
+            chassisBody.quaternion.copy(initialQuaternion);
+            // シャシーの慣性モーメントに対するダンピング（転がりにくくする）
+            chassisBody.angularDamping = 0.5;
+
+
+            const chassisGeometry = new THREE.BoxGeometry(chassisDepth, chassisHeight, chassisWidth);
+            const chassisMaterialThree = new THREE.MeshPhongMaterial({ color: 0xdd4444 });
+            carMesh = new THREE.Mesh(chassisGeometry, chassisMaterialThree);
+            carMesh.castShadow = true;
+            scene.add(carMesh);
+
+            const arrowHelper = new THREE.ArrowHelper( new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, chassisHeight / 2 + 0.2, 0), chassisDepth / 2, 0x00ff00, 0.6, 0.4 );
+            carMesh.add(arrowHelper);
+
+            vehicle = new CANNON.RaycastVehicle({
+                chassisBody: chassisBody,
+                indexRightAxis: 2, indexForwardAxis: 0, indexUpAxis: 1
+            });
+
+            const wheelOptions = {
+                radius: wheelRadius,
+                directionLocal: new CANNON.Vec3(0, -1, 0),
+                suspensionStiffness: 35,    // サスペンション硬度
+                suspensionRestLength: 0.35,  // サスペンション自然長
+                frictionSlip: 2.8,         // タイヤのグリップ力 ★重要
+                dampingRelaxation: 2.5,    // サスペンション伸び側ダンピング ★調整
+                dampingCompression: 3.5,   // サスペンション縮み側ダンピング ★調整
+                maxSuspensionForce: 100000,
+                rollInfluence: 0.03,        // ロール影響度（小さいほどロールしにくい）
+                axleLocal: new CANNON.Vec3(0, 0, 1),
+                chassisConnectionPointLocal: new CANNON.Vec3(),
+                maxSuspensionTravel: 0.28,   // 最大サストローク
+                customSlidingRotationalSpeed: -30,
+                useCustomSlidingRotationalSpeed: true,
+            };
+            const wheelMaterialCannon = new CANNON.Material("wheel");
+
+            // Front wheels
+            wheelOptions.isFrontWheel = true;
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.42, -chassisHeight * 0.35, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.42, -chassisHeight * 0.35, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            // Rear wheels
+            wheelOptions.isFrontWheel = false;
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.42, -chassisHeight * 0.35, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.42, -chassisHeight * 0.35, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            vehicle.addToWorld(world);
+
+            const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, wheelSegments);
+            wheelGeometry.rotateZ(Math.PI / 2); // 進行方向に向けるためZ軸回転に変更
+            const wheelMaterialThree = new THREE.MeshPhongMaterial({ color: 0x333333, emissive: 0x000000 });
+
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterialThree.clone());
+                wheelMesh.castShadow = true;
+                if (i === 0) wheelMesh.material.emissive.setHex(0x225522); // 前右
+                if (i === 1) wheelMesh.material.emissive.setHex(0x114411); // 前左
+                wheelMeshes.push(wheelMesh);
+                scene.add(wheelMesh);
+            }
+            
+            // Contact Materials for friction etc.
+            const wheel_ground = new CANNON.ContactMaterial(wheelMaterialCannon, groundBody.material, {
+                friction: 0.8, // ホイールと地面の基本摩擦、wheelInfo.frictionSlipが支配的
+                restitution: 0.1,
+                contactEquationStiffness: 1000
+            });
+            world.addContactMaterial(wheel_ground);
+
+            const chassis_ground = new CANNON.ContactMaterial(chassisMaterialCannon, groundBody.material, {
+                friction: 0.05, // シャシーは滑りやすく
+                restitution: 0.0
+            });
+            world.addContactMaterial(chassis_ground);
+        }
+
+        function onWindowResize() { /* ... */ }
+        function onKeyDown(event) {
+            if (keysActions[event.code]) {
+                vehicleSteeringState[keysActions[event.code]] = true;
+                event.preventDefault();
+            }
+            if (event.code === "KeyR") resetVehicle();
+        }
+        function onKeyUp(event) {
+            if (keysActions[event.code]) {
+                vehicleSteeringState[keysActions[event.code]] = false;
+                event.preventDefault();
+            }
+        }
+        function resetVehicle() { /* ... */ }
+
+        function updateVehicle() {
+            const { acceleration, braking, left, right } = vehicleSteeringState;
+            const localVelocity = chassisBody.vectorToLocalFrame(chassisBody.velocity);
+            const forwardSpeed = localVelocity.x; // 車両のローカルX軸（前方）の速度
+            const absForwardSpeed = Math.abs(forwardSpeed);
+
+            // 1. 速度感応エンジンフォース
+            let currentEngineForce = engineBaseForce;
+            if (absForwardSpeed > forceHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - forceHighSpeedThreshold;
+                const factor = Math.max(forceMinFactorAtHighSpeed, 1 - speedExcess / forceReductionSpeedRange);
+                currentEngineForce *= factor;
+            }
+            
+            // 2. 速度感応ステアリング
+            let currentMaxSteer = baseMaxSteerVal;
+            if (absForwardSpeed > steerHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - steerHighSpeedThreshold;
+                const factor = Math.max(steerMinFactorAt palvelu, 1 - speedExcess / steerReductionSpeedRange);
+                currentMaxSteer *= factor;
+            }
+
+            // ホイールごとの処理
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.applyEngineForce(0, i);
+                vehicle.setBrake(0, i);
+
+                // 後輪駆動 (インデックス 2, 3)
+                if (i === 2 || i === 3) {
+                    if (acceleration) {
+                        vehicle.applyEngineForce(currentEngineForce, i);
+                    }
+                }
+
+                // Sキー処理 (ブレーキまたは後進)
+                if (braking) {
+                    if (forwardSpeed > 0.1) { // 前進中ならブレーキ
+                        vehicle.setBrake(brakeForce, i);
+                    } else { // 停止中または後進中なら後進力 (後輪のみ)
+                        if (i === 2 || i === 3) {
+                            // 後進時はエンジンフォースを現在の計算値の半分程度に
+                            vehicle.applyEngineForce(-currentEngineForce * 0.6, i);
+                        }
+                    }
+                }
+            }
+
+            // ステアリング処理 (前輪: インデックス 0, 1)
+            const steerWheelIndices = [0, 1];
+            if (left) {
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[1]);
+            } else if (right) {
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[1]);
+            } else {
+                vehicle.setSteeringValue(0, steerWheelIndices[0]);
+                vehicle.setSteeringValue(0, steerWheelIndices[1]);
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = 1 / 60; // 固定タイムステップが望ましい
+            // const deltaTime = Math.min(world.timeSource.getDelta(), 0.1); // 可変だが上限あり
+
+            world.step(deltaTime);
+            if (vehicle) updateVehicle();
+
+            if (carMesh && chassisBody) {
+                carMesh.position.copy(chassisBody.position);
+                carMesh.quaternion.copy(chassisBody.quaternion);
+            }
+
+            if (vehicle && wheelMeshes.length === vehicle.wheelInfos.length) {
+                for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                    vehicle.updateWheelTransform(i);
+                    const transform = vehicle.wheelInfos[i].worldTransform;
+                    wheelMeshes[i].position.copy(transform.position);
+                    wheelMeshes[i].quaternion.copy(transform.quaternion);
+                }
+            }
+            renderer.render(scene, camera);
+        }
+        
+        // onWindowResize と resetVehicle の実装 (変更なしなので簡略化)
+        onWindowResize = () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+        resetVehicle = () => {
+            chassisBody.position.copy(initialPosition);
+            chassisBody.quaternion.copy(initialQuaternion);
+            chassisBody.velocity.set(0, 0, 0);
+            chassisBody.angularVelocity.set(0, 0, 0);
+            if (vehicle) vehicle.reset();
+        };
+
+        init();
+    </script>
+</body>
+</html>

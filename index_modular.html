@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js & Cannon.js RaycastVehicle v0.3 (Bruno Simon Inspired Tune) - Modular</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background-color: rgba(0,0,0,0.5); padding: 10px;
+            border-radius: 5px; font-family: sans-serif; z-index: 100;
+            font-size: 14px; line-height: 1.4;
+            max-width: 300px;
+        }
+        
+        #turbo-indicator {
+            position: absolute; top: 10px; left: 320px; color: #ff4444;
+            background-color: rgba(0,0,0,0.7); padding: 10px;
+            border-radius: 5px; font-family: sans-serif; z-index: 100;
+            font-size: 16px; font-weight: bold;
+            display: none;
+        }
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: white;
+            font-size: 24px; font-family: sans-serif;
+            background-color: rgba(0,0,0,0.7); padding: 20px;
+            border-radius: 10px; display: none; z-index: 100;
+        }
+
+        #collected-items {
+            position: absolute; top: 10px; right: 10px;
+            color: white; background-color: rgba(0,0,0,0.5);
+            padding: 15px; border-radius: 10px;
+            font-family: sans-serif; font-size: 24px;
+            display: flex; gap: 10px; align-items: center;
+            z-index: 100;
+            min-width: 200px;
+            box-sizing: border-box;
+        }
+        .item-slot {
+            width: 50px; height: 50px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            transition: all 0.3s ease;
+        }
+        .item-slot.filled {
+            background-color: rgba(68, 170, 255, 0.3);
+            border-color: rgba(68, 170, 255, 0.8);
+        }
+        
+        /* スピードメーターのスタイル */
+        #speedometer {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            color: white;
+            font-family: 'Hiragino Kaku Gothic ProN', 'ヒラギノ角ゴ ProN W3', 'Meiryo', 'メイリオ', sans-serif;
+            text-align: right;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 15px 25px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+        }
+        
+        #speed-value {
+            font-size: 48px;
+            font-weight: bold;
+            line-height: 1;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+        }
+        
+        #speed-unit {
+            font-size: 18px;
+            opacity: 0.8;
+            margin-top: -5px;
+        }
+    </style>
+</head>
+<body>
+    <style>
+        /* 車種選択モーダルのスタイル */
+        .swiper {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 0;
+        }
+        
+        .swiper-slide {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.3s ease;
+        }
+        
+        .swiper-slide-active {
+            transform: scale(1.05);
+        }
+        
+        .swiper-button-next,
+        .swiper-button-prev {
+            color: #4facfe;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+        
+        .swiper-button-next:hover,
+        .swiper-button-prev:hover {
+            background: rgba(79, 172, 254, 0.2);
+            transform: scale(1.1);
+        }
+        
+        .swiper-pagination-bullet {
+            background: rgba(255, 255, 255, 0.5);
+            opacity: 1;
+        }
+        
+        .swiper-pagination-bullet-active {
+            background: #4facfe;
+            transform: scale(1.2);
+        }
+        
+        #car-selection-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-family: 'Arial', sans-serif;
+            opacity: 0;
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .selection-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            width: 90%;
+            max-width: 1000px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .selection-title {
+            color: #fff;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            position: relative;
+            display: inline-block;
+        }
+
+        .selection-title::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 3px;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            border-radius: 3px;
+        }
+
+        .car-selection {
+            width: 100%;
+            margin: 40px auto;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .car-option {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            width: 350px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .car-option::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .car-option:hover {
+            transform: translateY(-10px);
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            border-color: rgba(79, 172, 254, 0.3);
+        }
+
+        .car-option:hover::before {
+            transform: scaleX(1);
+        }
+
+        .car-option.selected {
+            background: rgba(79, 172, 254, 0.1);
+            border-color: rgba(79, 172, 254, 0.5);
+        }
+
+        .car-option.selected::before {
+            transform: scaleX(1);
+        }
+
+        .car-image {
+            width: 100%;
+            height: 250px;
+            margin: 0 auto;
+            position: relative;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .car-model {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .car-model canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .car-option:hover .car-image {
+            transform: scale(1.05);
+        }
+
+        .car-name {
+            color: #fff;
+            font-size: 1.5em;
+            margin: 15px 0;
+            font-weight: 600;
+        }
+
+        .car-specs {
+            /* スペック表示を削除したため、余分な余白を削除 */
+            display: none;
+        }
+
+        .start-button {
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .start-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none;
+        }
+
+        .start-button:not(:disabled):hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4);
+        }
+
+
+        /* レスポンシブ対応 */
+        @media (max-width: 768px) {
+            .car-selection {
+                padding: 0 30px;
+            }
+            
+            .swiper-button-next,
+            .swiper-button-prev {
+                display: none;
+            }
+            
+            .selection-container {
+                padding: 20px;
+            }
+            
+            .selection-title {
+                font-size: 2em;
+            }
+        }
+    </style>
+
+    <!-- 車種選択モーダル -->
+    <div id="car-selection-modal">
+        <div class="selection-container">
+            <h1 class="selection-title">車種を選択</h1>
+            
+            <div class="car-selection">
+                <div class="swiper">
+                    <div class="swiper-wrapper">
+                        <div class="swiper-slide">
+                            <div class="car-option" data-value="rx7">
+                                <div class="car-image">
+                                    <div class="car-model" id="rx7-model"></div>
+                                </div>
+                                <h3 class="car-name">Mazda RX-7</h3>
+                                <div class="car-specs">
+                                    <!-- スペック表示は削除 -->
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="swiper-slide">
+                            <div class="car-option" data-value="r360">
+                                <div class="car-image">
+                                    <div class="car-model" id="r360-model"></div>
+                                </div>
+                                <h3 class="car-name">Mazda R360</h3>
+                                <div class="car-specs">
+                                    <!-- スペック表示は削除 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- ナビゲーションボタン -->
+                    <div class="swiper-button-next"></div>
+                    <div class="swiper-button-prev"></div>
+                    <!-- ページネーション -->
+                    <div class="swiper-pagination"></div>
+                </div>
+            </div>
+            
+            <select id="car-select" style="display: none;">
+                <option value="">-- 車種を選択 --</option>
+                <option value="rx7">Mazda RX-7</option>
+                <option value="r360">Mazda R360</option>
+            </select>
+            
+            <button type="button" id="start-button" class="start-button" disabled>スタート</button>
+        </div>
+    </div>
+
+    <div id="instructions" style="display: none;">
+        操作方法:<br>
+        W / ↑: アクセル<br>
+        S / ↓: ブレーキ / バック<br>
+        A / ←: 左に曲がる<br>
+        D / →: 右に曲がる<br>
+        Q: 車高アップ<br>
+        E: 車高ダウン<br>
+        R: リセット<br>
+        スペース: ターボ（押している間ON）
+    </div>
+    <div id="turbo-indicator">TURBO!</div>
+    <div id="loading">読み込み中...</div>
+    <div id="collected-items">
+        <div class="item-slot" id="slot-1"></div>
+        <div class="item-slot" id="slot-2"></div>
+        <div class="item-slot" id="slot-3"></div>
+    </div>
+    
+    <!-- スピードメーター -->
+    <div id="speedometer">
+        <div id="speed-value">0</div>
+        <div id="speed-unit">km/h</div>
+    </div>
+
+
+    <!-- Swiper JS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@8/swiper-bundle.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/swiper@8/swiper-bundle.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+    <!-- モジュラーJavaScript -->
+    <script type="module">
+        // config.jsのインポートテスト
+        import * as CONFIG from './js/config.js';
+        
+        // グローバル変数
+        let scene, camera, renderer;
+        let selectedCar = '';
+        
+        // 3Dモデルを管理するクラス
+        class CarModelViewer {
+            constructor(containerId, modelPath, scale = 1) {
+                this.container = document.getElementById(containerId);
+                this.modelPath = modelPath;
+                this.scale = scale;
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.model = null;
+                this.animationId = null;
+                
+                this.init();
+            }
+            
+            dispose() {
+                if (this.animationId) {
+                    cancelAnimationFrame(this.animationId);
+                }
+                if (this.renderer) {
+                    this.renderer.dispose();
+                }
+            }
+            
+            init() {
+                // シーンの設定
+                this.scene = new THREE.Scene();
+                this.scene.background = null;
+                
+                // カメラの設定
+                this.camera = new THREE.PerspectiveCamera(45, this.container.clientWidth / this.container.clientHeight, 0.1, 1000);
+                this.camera.position.set(0, 0, 10); // 正面から見る初期位置
+                
+                // レンダラーの設定
+                this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+                this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+                this.container.appendChild(this.renderer.domElement);
+                
+                // ライトの設定
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(1, 1, 1);
+                this.scene.add(directionalLight);
+                
+                // 3Dモデルの読み込み
+                this.loadModel();
+                
+                // アニメーション開始
+                this.animate();
+            }
+            
+            loadModel() {
+                const loader = new THREE.GLTFLoader();
+                
+                loader.load(
+                    this.modelPath,
+                    (gltf) => {
+                        this.model = gltf.scene;
+                        this.model.scale.set(this.scale, this.scale, this.scale);
+                        this.scene.add(this.model);
+                        
+                        // モデルの位置調整
+                        const box = new THREE.Box3().setFromObject(this.model);
+                        const center = box.getCenter(new THREE.Vector3());
+                        this.model.position.x = -center.x;
+                        this.model.position.y = -center.y; // 中央に配置
+                        this.model.position.z = -center.z;
+                        
+                        // カメラがモデル全体を見るように調整
+                        const size = box.getSize(new THREE.Vector3());
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const fov = this.camera.fov * (Math.PI / 180);
+                        const distance = maxDim / (2 * Math.tan(fov / 2));
+                        this.camera.position.z = distance * 1.2; // より近い距離に設定
+                        this.camera.lookAt(center);
+                        
+                        this.model.rotation.y = Math.PI / 4;
+                    },
+                    undefined,
+                    (error) => {
+                        console.error('Error loading model:', error);
+                    }
+                );
+            }
+            
+            animate() {
+                this.animationId = requestAnimationFrame(() => this.animate());
+                
+                if (this.model) {
+                    this.model.rotation.y += 0.005;
+                }
+                
+                if (this.renderer) {
+                    this.renderer.render(this.scene, this.camera);
+                }
+            }
+        }
+        
+        // DOMContentLoadedイベント
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM Content Loaded');
+            
+            const carSelect = document.getElementById('car-select');
+            const startButton = document.getElementById('start-button');
+            const carSelectionModal = document.getElementById('car-selection-modal');
+            
+            // Swiperの初期化
+            const swiper = new Swiper('.swiper', {
+                effect: 'coverflow',
+                grabCursor: true,
+                centeredSlides: true,
+                slidesPerView: 'auto',
+                coverflowEffect: {
+                    rotate: 0,
+                    stretch: 0,
+                    depth: 100,
+                    modifier: 2,
+                    slideShadows: true,
+                },
+                pagination: {
+                    el: '.swiper-pagination',
+                    clickable: true,
+                },
+                navigation: {
+                    nextEl: '.swiper-button-next',
+                    prevEl: '.swiper-button-prev',
+                },
+                on: {
+                    slideChange: function () {
+                        const activeSlide = this.slides[this.activeIndex];
+                        const carOption = activeSlide.querySelector('.car-option');
+                        const value = carOption.getAttribute('data-value');
+                        
+                        // 選択状態を更新
+                        document.querySelectorAll('.car-option').forEach(opt => {
+                            opt.classList.remove('selected');
+                        });
+                        carOption.classList.add('selected');
+                        
+                        // セレクトボックスの値を更新
+                        carSelect.value = value;
+                        selectedCar = value;
+                        
+                        // スタートボタンを有効化
+                        startButton.disabled = false;
+                    }
+                }
+            });
+            
+            // 車種選択画面の3Dモデル表示（2倍のサイズ）
+            const rx7Viewer = new CarModelViewer('rx7-model', CONFIG.CAR_MODELS.rx7.fallbackUrl || CONFIG.CAR_MODELS.rx7.url, 2);
+            const r360Viewer = new CarModelViewer('r360-model', CONFIG.CAR_MODELS.r360.url, 2);
+            
+            // スタートボタンのクリックイベント
+            startButton.addEventListener('click', () => {
+                console.log('Start button clicked, selected car:', selectedCar);
+                
+                // モデルビューアーのクリーンアップ
+                rx7Viewer.dispose();
+                r360Viewer.dispose();
+                
+                // モーダルを非表示
+                carSelectionModal.style.display = 'none';
+                document.getElementById('instructions').style.display = 'block';
+                
+                // メインの3Dシーンを初期化
+                initMainScene();
+            });
+        });
+        
+        // メインの3Dシーン初期化（仮実装）
+        function initMainScene() {
+            // Three.jsの基本セットアップ
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // 空色
+            scene.fog = new THREE.Fog(0x87ceeb, 10, 200); // フォグを追加
+            
+            // カメラ
+            camera = new THREE.PerspectiveCamera(
+                CONFIG.CAMERA.fov,
+                window.innerWidth / window.innerHeight,
+                CONFIG.CAMERA.near,
+                CONFIG.CAMERA.far
+            );
+            // カメラ位置を高く、遠くに設定
+            camera.position.set(0, 10, 20);
+            camera.lookAt(0, 0, 0);
+            
+            // レンダラー
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+            
+            // ライト
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.left = -50;
+            directionalLight.shadow.camera.right = 50;
+            directionalLight.shadow.camera.top = 50;
+            directionalLight.shadow.camera.bottom = -50;
+            scene.add(directionalLight);
+            
+            // 地面（仮）
+            const groundGeometry = new THREE.PlaneGeometry(200, 200);
+            const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x3c8f3c });
+            const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+            
+            // グリッドヘルパーを追加（地面の上に表示）
+            const gridHelper = new THREE.GridHelper(100, 50, 0x000000, 0x000000);
+            gridHelper.position.y = 0.01; // 地面の少し上に表示
+            scene.add(gridHelper);
+            
+            // テスト用の箱を追加（車両の代わり）
+            const boxGeometry = new THREE.BoxGeometry(4, 2, 8);
+            const boxMaterial = new THREE.MeshPhongMaterial({ color: 0x0066cc });
+            const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
+            boxMesh.position.y = 1;
+            boxMesh.castShadow = true;
+            scene.add(boxMesh);
+            
+            // アニメーションループ
+            function animate() {
+                requestAnimationFrame(animate);
+                renderer.render(scene, camera);
+            }
+            animate();
+            
+            // ウィンドウリサイズ対応
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+    </script>
+</body>
+</html>

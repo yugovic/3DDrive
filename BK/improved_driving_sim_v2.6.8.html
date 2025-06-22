@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Driving Simulation - Stabilized Physics</title>
+    <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #ff8c42;
+          overflow: hidden;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          color: white;
+        }
+        
+        .info-overlay {
+          position: absolute;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          text-align: center;
+          font-weight: bold;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          z-index: 10;
+          background-color: rgba(0, 0, 0, 0.5);
+          padding: 15px 25px;
+          border-radius: 8px;
+        }
+
+        .boost-indicator {
+          position: fixed;
+          top: 20px;
+          left: 20px;
+          background-color: rgba(255, 100, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 18px;
+          font-weight: bold;
+          z-index: 100;
+          display: none;
+        }
+
+        .items-collected {
+          position: fixed;
+          top: 80px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          z-index: 100;
+          min-width: 200px;
+        }
+
+        .item-display {
+          display: flex;
+          align-items: center;
+          margin: 5px 0;
+          padding: 8px;
+          background-color: rgba(255, 255, 255, 0.1);
+          border-radius: 4px;
+          border-left: 4px solid;
+        }
+
+        .item-display.coin {
+          border-left-color: #FFD700;
+        }
+
+        .item-display.gem {
+          border-left-color: #FF69B4;
+        }
+
+        .item-display.power {
+          border-left-color: #00FF00;
+        }
+
+        .item-icon {
+          font-size: 20px;
+          margin-right: 10px;
+        }
+        
+        .key-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 10px;
+          gap: 5px;
+        }
+        
+        .key {
+          background-color: white;
+          color: #333;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          border-radius: 4px;
+          font-weight: bold;
+        }
+        
+        .loading-status {
+          position: fixed;
+          bottom: 20px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 10px 15px;
+          border-radius: 4px;
+          font-size: 14px;
+          z-index: 100;
+        }
+
+        .speed-indicator {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          z-index: 100;
+        }
+
+        .debug-panel {
+          position: fixed;
+          top: 120px;
+          right: 20px;
+          background-color: rgba(255, 0, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: bold;
+          z-index: 100;
+          border: 2px solid #ff6666;
+        }
+
+        .debug-controls {
+          margin-top: 10px;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+        
+        #game-canvas {
+          width: 100%;
+          height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-overlay">
+        <div>Use arrow keys - SPACE for BOOST! - Collect items! - Stabilized Physics</div>
+        <div class="key-controls">
+            <div class="key">↑</div>
+            <div class="key">←</div>
+            <div class="key">↓</div>
+            <div class="key">→</div>
+            <div class="key">SPACE</div>
+        </div>
+    </div>
+    
+    <div class="loading-status" id="loading-status">ロード中...</div>
+    <div class="speed-indicator" id="speed-indicator">速度: 0 km/h</div>
+    <div class="boost-indicator" id="boost-indicator">🔥 BOOST ACTIVE! 🔥</div>
+    
+    <div class="debug-panel" id="debug-panel">
+        <div>🔧 安定化物理エンジン - Cannon.js</div>
+        <div>車体角度: <span id="car-angle">0.0</span>°</div>
+        <div>重心高さ: <span id="center-mass">0.0</span></div>
+        <div>車の高さ: <span id="car-height">0.0</span></div>
+        <div>物理速度: <span id="physics-speed">0.0</span> m/s</div>
+        <div>安定性: <span id="stability">安定</span></div>
+        <div class="debug-controls">
+          R: 車両リセット<br>
+          H: デバッグパネル表示切替
+        </div>
+    </div>
+    
+    <div class="items-collected" id="items-collected">
+        <div style="font-size: 14px; margin-bottom: 10px; text-align: center; color: #FFD700;">🏆 アイテム収集 🏆</div>
+        <div class="item-display coin">
+            <span class="item-icon">🪙</span>
+            <span>コイン: <span id="coin-count">0</span></span>
+        </div>
+        <div class="item-display gem">
+            <span class="item-icon">💎</span>
+            <span>ジェム: <span id="gem-count">0</span></span>
+        </div>
+        <div class="item-display power">
+            <span class="item-icon">⚡</span>
+            <span>パワーアップ: <span id="power-count">0</span></span>
+        </div>
+    </div>
+    
+    <script type="module">
+        // Three.js and Cannon.js implementation for 3D driving simulation with stabilized physics
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.126.0/build/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/DRACOLoader.js';
+        
+        // Import Cannon.js physics engine
+        import CANNON from 'https://cdn.skypack.dev/cannon';
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xff8c42);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        
+        // Stabilized physics world setup
+        const world = new CANNON.World();
+        world.gravity.set(0, -15, 0); // Stronger gravity for stability
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 20; // More iterations for stability
+        world.defaultContactMaterial.friction = 0.8;
+        world.defaultContactMaterial.restitution = 0.1; // Lower bounce
+        
+        // Materials for physics
+        const groundMaterial = new CANNON.Material('ground');
+        const wheelMaterial = new CANNON.Material('wheel');
+        const carMaterial = new CANNON.Material('car');
+        
+        // Contact materials with improved friction
+        const wheelGroundContact = new CANNON.ContactMaterial(wheelMaterial, groundMaterial, {
+            friction: 1.2, // Higher friction
+            restitution: 0.1, // Lower bounce
+            contactEquationStiffness: 1e8,
+            contactEquationRelaxation: 3
+        });
+        world.addContactMaterial(wheelGroundContact);
+        
+        // Set camera position
+        camera.position.set(15, 20, 15);
+        camera.lookAt(0, 0, 0);
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(20, 30, 20);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        scene.add(directionalLight);
+        
+        // Create ground
+        const groundGeometry = new THREE.PlaneGeometry(500, 500);
+        const groundMaterial3D = new THREE.MeshStandardMaterial({ 
+            color: 0xff8c42,
+            roughness: 0.8
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial3D);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Ground physics body
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        world.add(groundBody);
+        
+        // Store all collidable objects and items
+        const collidableObjects = [];
+        const collectibleItems = [];
+        const itemCounts = {
+            coins: 0,
+            gems: 0,
+            powerups: 0
+        };
+        
+        // Create trees with collision
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+            
+            // Trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.y = 1;
+            trunk.castShadow = true;
+            tree.add(trunk);
+            
+            // Foliage
+            const foliageGeometry = new THREE.BoxGeometry(3, 3, 3);
+            const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+            foliage.position.y = 3.5;
+            foliage.castShadow = true;
+            tree.add(foliage);
+            
+            tree.position.set(x, 0, z);
+            tree.userData = {
+                type: 'tree',
+                radius: 2,
+                height: 5
+            };
+            
+            // Physics body for tree
+            const treeShape = new CANNON.Cylinder(2, 2, 5, 8);
+            const treeBody = new CANNON.Body({ mass: 0 });
+            treeBody.addShape(treeShape);
+            treeBody.position.set(x, 2.5, z);
+            world.add(treeBody);
+            
+            collidableObjects.push(tree);
+            return tree;
+        }
+        
+        // Create collectible items
+        function createCollectibleItem(x, z, type) {
+            const group = new THREE.Group();
+            
+            let geometry, material, color, icon;
+            
+            switch(type) {
+                case 'coin':
+                    geometry = new THREE.CylinderGeometry(0.8, 0.8, 0.2, 12);
+                    color = 0xFFD700;
+                    icon = '🪙';
+                    break;
+                case 'gem':
+                    geometry = new THREE.OctahedronGeometry(0.8);
+                    color = 0xFF69B4;
+                    icon = '💎';
+                    break;
+                case 'powerup':
+                    geometry = new THREE.SphereGeometry(0.8, 12, 8);
+                    color = 0x00FF00;
+                    icon = '⚡';
+                    break;
+            }
+            
+            material = new THREE.MeshStandardMaterial({ 
+                color: color,
+                metalness: 0.8,
+                roughness: 0.2,
+                emissive: color,
+                emissiveIntensity: 0.1
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            const glowGeometry = geometry.clone();
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.3
+            });
+            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+            glow.scale.setScalar(1.2);
+            
+            group.add(mesh);
+            group.add(glow);
+            group.position.set(x, 1, z);
+            
+            group.userData = {
+                type: 'collectible',
+                itemType: type,
+                collected: false,
+                originalY: 1,
+                rotationSpeed: 0.02 + Math.random() * 0.02,
+                bobSpeed: 0.03 + Math.random() * 0.02,
+                icon: icon
+            };
+            
+            collectibleItems.push(group);
+            return group;
+        }
+        
+        // Add trees
+        const trees = [
+            createTree(-15, 10),
+            createTree(15, 15),
+            createTree(-20, -15),
+            createTree(25, -10),
+            createTree(-35, 25),
+            createTree(35, -25),
+            createTree(-50, 0),
+            createTree(50, 5)
+        ];
+        trees.forEach(tree => scene.add(tree));
+        
+        // Add collectible items
+        const items = [
+            createCollectibleItem(-10, 5, 'coin'),
+            createCollectibleItem(10, -5, 'coin'),
+            createCollectibleItem(-25, 20, 'gem'),
+            createCollectibleItem(25, -20, 'gem'),
+            createCollectibleItem(0, 25, 'powerup'),
+            createCollectibleItem(0, -25, 'powerup'),
+            createCollectibleItem(-45, 0, 'coin'),
+            createCollectibleItem(45, 0, 'coin')
+        ];
+        items.forEach(item => scene.add(item));
+        
+        // Stabilized car physics variables
+        let car;
+        let carBody;
+        let vehicle; // Cannon.js RaycastVehicle
+        let wheelBodies = [];
+        
+        const carPhysics = {
+            maxSteerVal: 0.3,
+            maxSpeed: 20,
+            maxForce: 1500,
+            brakeForce: 10,
+            mass: 500, // Lighter for better control
+            chassisWidth: 1.8,
+            chassisHeight: 0.6, // Lower center of mass
+            chassisLength: 3.5,
+            wheelRadius: 0.4,
+            wheelHalfTrack: 0.8,
+            wheelAxisPositionBack: -1.2,
+            wheelAxisPositionFront: 1.0,
+            isGrounded: true
+        };
+
+        // Create stabilized car physics with RaycastVehicle
+        function createStabilizedCarPhysics() {
+            // Create chassis body with lower center of mass
+            const chassisShape = new CANNON.Box(new CANNON.Vec3(
+                carPhysics.chassisWidth / 2,
+                carPhysics.chassisHeight / 2,
+                carPhysics.chassisLength / 2
+            ));
+            
+            carBody = new CANNON.Body({ mass: carPhysics.mass });
+            carBody.addShape(chassisShape);
+            carBody.position.set(0, 2, 0); // Start higher to prevent ground intersection
+            
+            // Lower center of mass for stability
+            carBody.shapeOffsets[0].y = -carPhysics.chassisHeight / 4;
+            
+            // Add angular damping for stability
+            carBody.angularDamping = 0.8;
+            carBody.linearDamping = 0.1;
+            
+            world.add(carBody);
+            
+            // Create raycast vehicle for stable car physics
+            vehicle = new CANNON.RaycastVehicle({
+                chassisBody: carBody,
+                indexRightAxis: 0,
+                indexUpAxis: 1,
+                indexForwardAxis: 2
+            });
+            
+            // Add wheels to the vehicle
+            const wheelOptions = {
+                radius: carPhysics.wheelRadius,
+                directionLocal: new CANNON.Vec3(0, -1, 0),
+                suspensionStiffness: 50, // Stiffer suspension
+                suspensionRestLength: 0.6,
+                frictionSlip: 2.5, // Higher friction
+                dampingRelaxation: 2.3,
+                dampingCompression: 4.4,
+                maxSuspensionForce: 10000,
+                rollInfluence: 0.01, // Reduce roll
+                axleLocal: new CANNON.Vec3(-1, 0, 0),
+                chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
+                maxSuspensionTravel: 0.25,
+                customSlidingRotationalSpeed: -30,
+                useCustomSlidingRotationalSpeed: true
+            };
+            
+            // Front wheels
+            wheelOptions.chassisConnectionPointLocal.set(carPhysics.wheelHalfTrack, 0, carPhysics.wheelAxisPositionFront);
+            vehicle.addWheel(wheelOptions);
+            
+            wheelOptions.chassisConnectionPointLocal.set(-carPhysics.wheelHalfTrack, 0, carPhysics.wheelAxisPositionFront);
+            vehicle.addWheel(wheelOptions);
+            
+            // Back wheels
+            wheelOptions.chassisConnectionPointLocal.set(carPhysics.wheelHalfTrack, 0, carPhysics.wheelAxisPositionBack);
+            vehicle.addWheel(wheelOptions);
+            
+            wheelOptions.chassisConnectionPointLocal.set(-carPhysics.wheelHalfTrack, 0, carPhysics.wheelAxisPositionBack);
+            vehicle.addWheel(wheelOptions);
+            
+            vehicle.addToWorld(world);
+            
+            // Create visual wheels
+            for (let i = 0; i < 4; i++) {
+                const wheelGeometry = new THREE.CylinderGeometry(carPhysics.wheelRadius, carPhysics.wheelRadius, 0.3, 16);
+                const wheelMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0x333333,
+                    metalness: 0.7,
+                    roughness: 0.3
+                });
+                const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial);
+                wheelMesh.castShadow = true;
+                scene.add(wheelMesh);
+                wheelBodies.push(wheelMesh);
+            }
+            
+            console.log('安定化車両物理システム初期化完了');
+            console.log('車体質量:', carPhysics.mass, 'kg');
+            console.log('重心の高さ:', carPhysics.chassisHeight / 2, 'm');
+        }
+
+        // Reset vehicle to starting position
+        function resetVehicle() {
+            if (carBody && vehicle) {
+                // Reset position and rotation
+                carBody.position.set(0, 3, 0);
+                carBody.velocity.set(0, 0, 0);
+                carBody.angularVelocity.set(0, 0, 0);
+                carBody.quaternion.set(0, 0, 0, 1);
+                
+                // Apply brake to all wheels
+                for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                    vehicle.setBrake(carPhysics.brakeForce, i);
+                    vehicle.setSteeringValue(0, i);
+                }
+                
+                console.log('車両をリセットしました');
+            }
+        }
+        
+        // Particle system for effects
+        const driftParticles = [];
+        const maxDriftParticles = 100;
+        
+        function createDriftParticle(position, velocity) {
+            const geometry = new THREE.SphereGeometry(0.2, 6, 4);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: 0xcccccc, 
+                transparent: true, 
+                opacity: 0.6
+            });
+            const particle = new THREE.Mesh(geometry, material);
+            
+            particle.position.copy(position);
+            particle.velocity = velocity.clone();
+            particle.velocity.y = Math.random() * 0.05 + 0.02;
+            particle.life = 1.0;
+            
+            scene.add(particle);
+            driftParticles.push(particle);
+            
+            if (driftParticles.length > maxDriftParticles) {
+                const oldParticle = driftParticles.shift();
+                scene.remove(oldParticle);
+                oldParticle.geometry.dispose();
+                oldParticle.material.dispose();
+            }
+        }
+        
+        function updateDriftParticles() {
+            for (let i = driftParticles.length - 1; i >= 0; i--) {
+                const particle = driftParticles[i];
+                
+                particle.position.add(particle.velocity);
+                particle.velocity.multiplyScalar(0.96);
+                particle.velocity.y -= 0.001;
+                particle.life -= 0.02;
+                particle.material.opacity = particle.life * 0.6;
+                
+                if (particle.life <= 0 || particle.position.y < -1) {
+                    scene.remove(particle);
+                    particle.geometry.dispose();
+                    particle.material.dispose();
+                    driftParticles.splice(i, 1);
+                }
+            }
+        }
+        
+        // Update collectible items
+        function updateCollectibleItems() {
+            const time = Date.now() * 0.001;
+            
+            collectibleItems.forEach(item => {
+                if (!item.userData.collected) {
+                    item.rotation.y += item.userData.rotationSpeed;
+                    item.position.y = item.userData.originalY + Math.sin(time * item.userData.bobSpeed * 10) * 0.3;
+                    
+                    const glowMesh = item.children[1];
+                    if (glowMesh) {
+                        const pulseScale = 1.2 + Math.sin(time * 3) * 0.1;
+                        glowMesh.scale.setScalar(pulseScale);
+                    }
+                }
+            });
+        }
+        
+        // Check item collection
+        function checkItemCollection() {
+            if (!car) return;
+            
+            collectibleItems.forEach(item => {
+                if (!item.userData.collected) {
+                    const distance = car.position.distanceTo(item.position);
+                    if (distance < 2.5) {
+                        item.userData.collected = true;
+                        scene.remove(item);
+                        
+                        switch(item.userData.itemType) {
+                            case 'coin':
+                                itemCounts.coins++;
+                                document.getElementById('coin-count').textContent = itemCounts.coins;
+                                break;
+                            case 'gem':
+                                itemCounts.gems++;
+                                document.getElementById('gem-count').textContent = itemCounts.gems;
+                                break;
+                            case 'powerup':
+                                itemCounts.powerups++;
+                                document.getElementById('power-count').textContent = itemCounts.powerups;
+                                break;
+                        }
+                        
+                        // Create collection effect
+                        createCollectionEffect(item.position);
+                    }
+                }
+            });
+        }
+        
+        function createCollectionEffect(position) {
+            for (let i = 0; i < 6; i++) {
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    Math.random() * 0.15 + 0.1,
+                    (Math.random() - 0.5) * 0.2
+                );
+                createDriftParticle(position, velocity);
+            }
+        }
+        
+        const loadingStatus = document.getElementById('loading-status');
+        const speedIndicator = document.getElementById('speed-indicator');
+        const boostIndicator = document.getElementById('boost-indicator');
+        
+        // Set up loaders
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+        
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+        
+        // Load car model
+        loader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/ferrari.glb', 
+            function(gltf) {
+                car = gltf.scene;
+                car.scale.set(0.5, 0.5, 0.5); // Smaller scale
+                car.castShadow = true;
+                
+                car.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                scene.add(car);
+                
+                // Initialize stabilized physics
+                createStabilizedCarPhysics();
+                
+                loadingStatus.textContent = "安定化物理エンジン初期化完了！";
+                loadingStatus.style.backgroundColor = "rgba(0, 128, 0, 0.7)";
+                
+                setTimeout(() => {
+                    loadingStatus.style.opacity = "0";
+                    loadingStatus.style.transition = "opacity 1s";
+                }, 3000);
+            },
+            function(xhr) {
+                if (xhr.total === 0) {
+                    loadingStatus.textContent = `ロード中...`;
+                } else {
+                    const percentComplete = xhr.loaded / xhr.total * 100;
+                    loadingStatus.textContent = `ロード中...${Math.round(percentComplete)}%`;
+                }
+            },
+            function(error) {
+                console.error(error);
+                loadingStatus.textContent = "ロード失敗！";
+                loadingStatus.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
+            }
+        );
+        
+        const keyState = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keyState[e.key] = true;
+            keyState[e.code] = true;
+            
+            if (e.code === 'KeyR') {
+                resetVehicle();
+                e.preventDefault();
+            } else if (e.code === 'KeyH') {
+                const debugPanel = document.getElementById('debug-panel');
+                debugPanel.style.display = debugPanel.style.display === 'none' ? 'block' : 'none';
+                e.preventDefault();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keyState[e.key] = false;
+            keyState[e.code] = false;
+        });
+        
+        // Apply forces using RaycastVehicle
+        function applyVehicleForces() {
+            if (!vehicle) return;
+            
+            const isBoostActive = keyState[' '] || keyState['Space'];
+            const maxForce = isBoostActive ? carPhysics.maxForce * 1.5 : carPhysics.maxForce;
+            
+            if (isBoostActive) {
+                boostIndicator.style.display = 'block';
+            } else {
+                boostIndicator.style.display = 'none';
+            }
+            
+            let engineForce = 0;
+            let vehicleSteering = 0;
+            
+            // Engine force
+            if (keyState['ArrowUp']) {
+                engineForce = maxForce;
+            } else if (keyState['ArrowDown']) {
+                engineForce = -maxForce * 0.5;
+            }
+            
+            // Steering
+            if (keyState['ArrowLeft']) {
+                vehicleSteering = carPhysics.maxSteerVal;
+            } else if (keyState['ArrowRight']) {
+                vehicleSteering = -carPhysics.maxSteerVal;
+            }
+            
+            // Apply forces to vehicle
+            vehicle.applyEngineForce(engineForce, 2);
+            vehicle.applyEngineForce(engineForce, 3);
+            vehicle.setSteeringValue(vehicleSteering, 0);
+            vehicle.setSteeringValue(vehicleSteering, 1);
+            
+            // Apply brake when no input
+            if (!keyState['ArrowUp'] && !keyState['ArrowDown']) {
+                vehicle.setBrake(carPhysics.brakeForce * 0.1, 0);
+                vehicle.setBrake(carPhysics.brakeForce * 0.1, 1);
+                vehicle.setBrake(carPhysics.brakeForce * 0.1, 2);
+                vehicle.setBrake(carPhysics.brakeForce * 0.1, 3);
+            } else {
+                vehicle.setBrake(0, 0);
+                vehicle.setBrake(0, 1);
+                vehicle.setBrake(0, 2);
+                vehicle.setBrake(0, 3);
+            }
+            
+            // Update speed indicator
+            const speed = carBody.velocity.length();
+            const speedKmh = Math.round(speed * 3.6);
+            speedIndicator.textContent = `速度: ${speedKmh} km/h`;
+        }
+        
+        // Update physics with stabilized system
+        function updatePhysics() {
+            if (!vehicle || !carBody) return;
+            
+            const timeStep = 1 / 60;
+            world.step(timeStep);
+            
+            // Sync visual car with physics body
+            if (car) {
+                car.position.copy(carBody.position);
+                car.quaternion.copy(carBody.quaternion);
+            }
+            
+            // Update wheel positions
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.updateWheelTransform(i);
+                const t = vehicle.wheelInfos[i].worldTransform;
+                const wheelMesh = wheelBodies[i];
+                if (wheelMesh) {
+                    wheelMesh.position.copy(t.position);
+                    wheelMesh.quaternion.copy(t.quaternion);
+                }
+            }
+        }
+        
+        // Update camera
+        function updateCamera() {
+            if (!car) return;
+            
+            const cameraOffset = new THREE.Vector3(15, 20, 15);
+            const targetCameraPosition = car.position.clone().add(cameraOffset);
+            
+            camera.position.lerp(targetCameraPosition, 0.08);
+            camera.lookAt(car.position);
+        }
+        
+        // Update debug info
+        function updateDebugInfo() {
+            if (!car || !carBody) return;
+            
+            // Calculate car angle
+            const euler = new THREE.Euler().setFromQuaternion(car.quaternion);
+            const angleX = THREE.MathUtils.radToDeg(euler.x);
+            const angleZ = THREE.MathUtils.radToDeg(euler.z);
+            
+            document.getElementById('car-angle').textContent = 
+                `X:${angleX.toFixed(1)} Z:${angleZ.toFixed(1)}`;
+            document.getElementById('center-mass').textContent = carPhysics.chassisHeight.toFixed(1);
+            document.getElementById('car-height').textContent = car.position.y.toFixed(1);
+            document.getElementById('physics-speed').textContent = carBody.velocity.length().toFixed(1);
+            
+            // Stability check
+            const stability = (Math.abs(angleX) < 30 && Math.abs(angleZ) < 30) ? '安定' : '不安定';
+            document.getElementById('stability').textContent = stability;
+            document.getElementById('stability').style.color = stability === '安定' ? '#00ff00' : '#ff0000';
+        }
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Main animation loop
+        let frameCount = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Apply vehicle forces
+            applyVehicleForces();
+            
+            // Update physics
+            updatePhysics();
+            
+            // Update camera
+            updateCamera();
+            
+            // Update effects and items
+            updateDriftParticles();
+            updateCollectibleItems();
+            checkItemCollection();
+            
+            // Update debug info periodically
+            frameCount++;
+            if (frameCount % 30 === 0) {
+                updateDebugInfo();
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

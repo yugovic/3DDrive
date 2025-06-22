@@ -1,0 +1,1861 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js & Cannon.js RaycastVehicle v0.3 (Bruno Simon Inspired Tune)</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background-color: rgba(0,0,0,0.5); padding: 10px;
+            border-radius: 5px; font-family: sans-serif; z-index: 100;
+            font-size: 14px; line-height: 1.4;
+            max-width: 300px;
+        }
+        
+        #turbo-indicator {
+            position: absolute; top: 10px; left: 320px; color: #ff4444;
+            background-color: rgba(0,0,0,0.7); padding: 10px;
+            border-radius: 5px; font-family: sans-serif; z-index: 100;
+            font-size: 16px; font-weight: bold;
+            display: none;
+        }
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); color: white;
+            font-size: 24px; font-family: sans-serif;
+            background-color: rgba(0,0,0,0.7); padding: 20px;
+            border-radius: 10px; display: none; z-index: 100;
+        }
+
+        #collected-items {
+            position: absolute; top: 10px; right: 10px;
+            color: white; background-color: rgba(0,0,0,0.5);
+            padding: 15px; border-radius: 10px;
+            font-family: sans-serif; font-size: 24px;
+            display: flex; gap: 10px; align-items: center;
+            z-index: 100;
+            min-width: 200px;
+            box-sizing: border-box;
+        }
+        .item-slot {
+            width: 50px; height: 50px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            transition: all 0.3s ease;
+        }
+        .item-slot.filled {
+            background-color: rgba(68, 170, 255, 0.3);
+            border-color: rgba(68, 170, 255, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        操作方法:<br>
+        W / ↑: アクセル<br>
+        S / ↓: ブレーキ / バック<br>
+        A / ←: 左に曲がる<br>
+        D / →: 右に曲がる<br>
+        Q: 車高アップ<br>
+        E: 車高ダウン<br>
+        R: リセット<br>
+        スペース: ターボ（押している間ON）
+    </div>
+    <div id="turbo-indicator">TURBO!</div>
+    <div id="loading">読み込み中...</div>
+    <div id="collected-items">
+        <div class="item-slot" id="slot-1"></div>
+        <div class="item-slot" id="slot-2"></div>
+        <div class="item-slot" id="slot-3"></div>
+    </div>
+
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>
+        // --- グローバル変数 ---
+        let scene, camera, renderer;
+        let world, vehicle, chassisBody, groundBody;
+        let carMesh = null;
+        let groundMesh;
+        let debugMode = true; // デフォルトでデバッグモードをオン
+        let cannonDebugger;
+        let debugMenuVisible = false; // デバッグメニュー表示状態
+
+        // スロープ関連の変数
+        let slopeMesh, slopeBody;
+        let slopeHeight = 3.0; // 初期の高さ
+        let slopeLength = 15.0; // スロープの長さ
+        let slopeWidth = 8.0;  // スロープの幅
+        let slopePosition = { x: 0, y: slopeHeight / 2, z: -15 }; // スロープの位置
+        let slopeAngle = Math.atan2(slopeHeight, slopeLength); // 初期の角度（自動計算）
+        let useCustomAngle = false; // カスタム角度を使用するかどうか
+
+        // コリジョン調整用の変数（デバッグ用にコメントアウト）
+        /*
+        let collisionAdjustments = {
+            mainBodyY: 0,
+            mainBodyZ: 0,
+            cabinY: 1.23 * 0.3 // 初期値
+        };
+        */
+        let adjustmentStep = 0.05; // 調整ステップ幅
+        
+        // カメラ位置調整用の変数
+        let cameraAdjustments = {
+            distance: 10,      // 車からの距離
+            height: 10,        // 車からの高さ
+            sideOffset: 10,    // 車からの横方向オフセット
+            followFactor: 0.1  // 追従の滑らかさ
+        };
+
+        const initialCameraPosition = {
+            x: -8.0,
+            y: 11.9,
+            z: 9.5
+        };
+
+        const chassisDepth = 4.29; 
+        const chassisWidth = 1.76; 
+        const chassisHeight = 0.83;  // 固定値
+        const massVehicle = 170; // ★変更: 軽量化
+
+        const wheelAxisPosition = chassisWidth * 0.42;
+        const wheelRadius = 0.33; 
+        const wheelThickness = 0.25;
+
+        const keysActions = {
+            "KeyW": "acceleration", "ArrowUp": "acceleration",
+            "KeyS": "braking", "ArrowDown": "braking",
+            "KeyA": "left", "ArrowLeft": "left",
+            "KeyD": "right", "ArrowRight": "right"
+        };
+        const vehicleSteeringState = { 
+            acceleration: false, braking: false, left: false, right: false
+        };
+
+        let baseMaxSteerVal = 0.65; // ★変更: ステアリング切れ角を増加
+        let engineBaseForce = 1050; // ★変更: 元の値(7500)から削減
+        let brakeForce = 10; // ★変更: 初期値を10に変更
+        const turboMultiplier = 3.0; // ターボ時のパワー倍率
+        let isTurboActive = false; // ターボが有効かどうか
+        
+        const steerHighSpeedThreshold = 8;  
+        const steerMinFactorAtHighSpeed = 0.3; 
+        const steerReductionSpeedRange = 20; 
+
+        const forceHighSpeedThreshold = 10; 
+        const forceMinFactorAtHighSpeed = 0.05; 
+        const forceReductionSpeedRange = 25;  
+
+        let initialPosition;
+        let initialQuaternion;
+
+        let vehicleHeightOffset = 0;  // 車両の高さオフセット
+        let initialVehicleY = 0;      // 車両の初期Y座標
+        let vehicleMesh = null;       // 車両の3Dメッシュ
+        let vehicleBody = null;       // 車両の物理ボディ
+
+        // 車両の初期位置オフセット
+        let vehiclePositionOffset = {
+            x: 0,
+            y: 0,
+            z: 0
+        };
+        const positionStep = 0.5; // 位置調整のステップサイズ
+
+        const loadingManager = new THREE.LoadingManager();
+        const gltfLoader = new THREE.GLTFLoader(loadingManager);
+        const modelUrl = 'https://raw.githubusercontent.com/yugovic/test/main/rx7Sava_v5.glb';
+        let loadingElement; 
+
+        // --- ヘルパー関数定義 ---
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(150, 150, 100, 100); 
+            
+            // 単色の道路マテリアルを作成
+            const groundMaterialThree = new THREE.MeshStandardMaterial({ 
+                color: 0xD8D8D8,
+                metalness: 0.3, 
+                roughness: 0.8,
+            });
+            
+            groundMesh = new THREE.Mesh(groundGeometry, groundMaterialThree);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;  // 地面が影を受け付けるように設定
+            groundMesh.castShadow = false;   // 地面は影を落とさない
+            scene.add(groundMesh);
+
+            const groundMaterialCannon = new CANNON.Material("ground");
+            groundBody = new CANNON.Body({ 
+                mass: 0, 
+                material: groundMaterialCannon,
+                collisionFilterGroup: 1,
+                collisionFilterMask: 1
+            });
+            groundBody.addShape(new CANNON.Plane());
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+            
+            // フィールドの周囲に壁を追加
+            const wallHeight = 5; // 壁の高さ
+            const wallThickness = 2; // 壁の厚さ
+            const fieldSize = 75; // フィールドの半分のサイズ（150/2）
+            
+            // 壁のマテリアル
+            const wallMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x888888,
+                metalness: 0.3,
+                roughness: 0.7,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            // 壁の物理マテリアル
+            const wallPhysicsMaterial = new CANNON.Material('wallMaterial');
+            
+            // 4方向の壁を作成
+            const walls = [
+                // 北側の壁
+                { position: [0, wallHeight/2, fieldSize + wallThickness/2], size: [fieldSize*2 + wallThickness*2, wallHeight, wallThickness] },
+                // 南側の壁
+                { position: [0, wallHeight/2, -fieldSize - wallThickness/2], size: [fieldSize*2 + wallThickness*2, wallHeight, wallThickness] },
+                // 東側の壁
+                { position: [fieldSize + wallThickness/2, wallHeight/2, 0], size: [wallThickness, wallHeight, fieldSize*2] },
+                // 西側の壁
+                { position: [-fieldSize - wallThickness/2, wallHeight/2, 0], size: [wallThickness, wallHeight, fieldSize*2] }
+            ];
+            
+            walls.forEach((wall, index) => {
+                // 3D表示用の壁
+                const wallGeometry = new THREE.BoxGeometry(...wall.size);
+                const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+                wallMesh.position.set(...wall.position);
+                wallMesh.receiveShadow = true;
+                wallMesh.castShadow = true;
+                scene.add(wallMesh);
+                
+                // 物理演算用の壁
+                const wallShape = new CANNON.Box(new CANNON.Vec3(wall.size[0]/2, wall.size[1]/2, wall.size[2]/2));
+                const wallBody = new CANNON.Body({
+                    mass: 0, // 質量0で固定
+                    shape: wallShape,
+                    material: wallPhysicsMaterial,
+                    collisionFilterGroup: 1,
+                    collisionFilterMask: 1
+                });
+                wallBody.position.set(...wall.position);
+                world.addBody(wallBody);
+            });
+            
+            // スロープを作成
+            createSlope();
+            
+            // 跳ねるオブジェクトを作成
+            createBouncingCube();
+            createBouncingSphere();
+        }
+        
+        // 跳ねる立方体を作成する関数
+        function createBouncingCube() {
+            // 立方体のサイズ
+            const size = 1.5;
+            // 立方体の位置（スロープの手前に配置）
+            const position = new THREE.Vector3(0, size/2, 10);
+            
+            // 見た目の作成
+            const geometry = new THREE.BoxGeometry(size, size, size);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0xff0000,
+                shininess: 30,
+                transparent: true,
+                opacity: 0.9
+            });
+            const cubeMesh = new THREE.Mesh(geometry, material);
+            cubeMesh.position.copy(position);
+            cubeMesh.castShadow = true;
+            cubeMesh.receiveShadow = true;
+            scene.add(cubeMesh);
+            
+            // 物理演算ボディの作成
+            const cubeShape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
+            const cubeBody = new CANNON.Body({
+                mass: 5, // 適度な重さ
+                position: new CANNON.Vec3(position.x, position.y, position.z),
+                shape: cubeShape,
+                linearDamping: 0.1, // 空気抵抗
+                angularDamping: 0.3,  // 回転抵抗
+                material: new CANNON.Material({
+                    friction: 0.1, // 摩擦係数を低くして滑りやすく
+                    restitution: 0.8  // 反発係数を高く
+                })
+            });
+            
+            // 車両との衝突時の反発を設定
+            const vehicleCubeContactMaterial = new CANNON.ContactMaterial(
+                cubeBody.material,
+                window.chassisMaterialCannon || new CANNON.Material(),
+                {
+                    friction: 0.1,
+                    restitution: 0.9, // 反発係数を高く
+                    contactEquationStiffness: 1e8,
+                    contactEquationRelaxation: 3
+                }
+            );
+            world.addContactMaterial(vehicleCubeContactMaterial);
+            
+            // 地面との衝突を設定
+            const groundCubeContactMaterial = new CANNON.ContactMaterial(
+                cubeBody.material,
+                window.groundMaterial || new CANNON.Material(),
+                {
+                    friction: 0.3,
+                    restitution: 0.5,
+                    contactEquationStiffness: 1e8,
+                    contactEquationRelaxation: 3
+                }
+            );
+            world.addContactMaterial(groundCubeContactMaterial);
+            
+            // ワールドに追加
+            world.addBody(cubeBody);
+            
+            // アニメーションループで位置を同期
+            function updateCube() {
+                if (cubeMesh && cubeBody) {
+                    cubeMesh.position.copy(cubeBody.position);
+                    cubeMesh.quaternion.copy(cubeBody.quaternion);
+                }
+                requestAnimationFrame(updateCube);
+            }
+            updateCube();
+        }
+
+        // 跳ねる球体を作成する関数
+        function createBouncingSphere() {
+            // 球体の半径
+            const radius = 1.0;
+            // 球体の位置（立方体の横に配置）
+            const position = new THREE.Vector3(3, radius, 10);
+            
+            // 見た目の作成
+            const geometry = new THREE.SphereGeometry(radius, 32, 32);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x00aaff,
+                shininess: 50,
+                transparent: true,
+                opacity: 0.9
+            });
+            const sphereMesh = new THREE.Mesh(geometry, material);
+            sphereMesh.position.copy(position);
+            sphereMesh.castShadow = true;
+            sphereMesh.receiveShadow = true;
+            scene.add(sphereMesh);
+            
+            // 物理演算ボディの作成
+            const sphereShape = new CANNON.Sphere(radius);
+            const sphereBody = new CANNON.Body({
+                mass: 3, // 立方体より少し軽く
+                position: new CANNON.Vec3(position.x, position.y, position.z),
+                shape: sphereShape,
+                linearDamping: 0.05, // 空気抵抗（転がりやすく）
+                angularDamping: 0.1,  // 回転抵抗
+                material: new CANNON.Material({
+                    friction: 0.2,    // 適度な摩擦
+                    restitution: 0.9   // 高反発
+                })
+            });
+            
+            // 車両との衝突時の反発を設定
+            const vehicleSphereContactMaterial = new CANNON.ContactMaterial(
+                sphereBody.material,
+                window.chassisMaterialCannon || new CANNON.Material(),
+                {
+                    friction: 0.1,
+                    restitution: 0.95, // 高反発
+                    contactEquationStiffness: 1e8,
+                    contactEquationRelaxation: 3
+                }
+            );
+            world.addContactMaterial(vehicleSphereContactMaterial);
+            
+            // 地面との衝突を設定
+            const groundSphereContactMaterial = new CANNON.ContactMaterial(
+                sphereBody.material,
+                window.groundMaterial || new CANNON.Material(),
+                {
+                    friction: 0.3,
+                    restitution: 0.7,
+                    contactEquationStiffness: 1e8,
+                    contactEquationRelaxation: 3
+                }
+            );
+            world.addContactMaterial(groundSphereContactMaterial);
+            
+            // ワールドに追加
+            world.addBody(sphereBody);
+            
+            // アニメーションループで位置を同期
+            function updateSphere() {
+                if (sphereMesh && sphereBody) {
+                    sphereMesh.position.copy(sphereBody.position);
+                    sphereMesh.quaternion.copy(sphereBody.quaternion);
+                }
+                requestAnimationFrame(updateSphere);
+            }
+            updateSphere();
+        }
+        
+        // グローバル変数にchassisMaterialCannonを追加
+        window.chassisMaterialCannon = window.chassisMaterialCannon || new CANNON.Material('chassisMaterial');
+        
+        // スロープを作成する関数
+        function createSlope() {
+            // Three.jsのスロープメッシュを作成
+            const slopeGeometry = new THREE.BoxGeometry(slopeWidth, slopeHeight, slopeLength);
+            const slopeMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x8B4513, // 茶色
+                metalness: 0.1, 
+                roughness: 0.8 
+            });
+            slopeMesh = new THREE.Mesh(slopeGeometry, slopeMaterial);
+            slopeMesh.position.set(slopePosition.x, slopePosition.y, slopePosition.z);
+            
+            // 傾斜を25度（約0.4363ラジアン）に設定
+            const slopeAngleRad = 25 * (Math.PI / 180); // 25度をラジアンに変換
+            const actualAngle = useCustomAngle ? slopeAngle : slopeAngleRad;
+            slopeMesh.rotation.x = actualAngle;
+            slopeMesh.castShadow = true;
+            slopeMesh.receiveShadow = true;
+            scene.add(slopeMesh);
+            
+            // Cannon.jsの物理ボディを作成
+            const slopeShape = new CANNON.Box(new CANNON.Vec3(slopeWidth/2, slopeHeight/2, slopeLength/2));
+            slopeBody = new CANNON.Body({ mass: 0 }); // 質量0で固定
+            slopeBody.addShape(slopeShape);
+            
+            // 位置を設定
+            slopeBody.position.set(slopePosition.x, slopePosition.y, slopePosition.z);
+            
+            // 同じ30度の回転を適用
+            slopeBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), slopeAngleRad);
+            
+            world.addBody(slopeBody);
+        }
+        
+        // スロープのジオメトリを更新する関数
+        function updateSlopeGeometry() {
+            // シーンからスロープを削除
+            scene.remove(slopeMesh);
+            world.remove(slopeBody);
+            
+            // 新しい位置を計算
+            slopePosition.y = slopeHeight / 2;
+            
+            // スロープを再作成
+            createSlope();
+            
+            // デバッグ情報を更新
+            updateDebugInfo();
+        }
+
+        function onWindowResize() {
+            if (camera && renderer) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+        
+        function onKeyDown(event) {
+
+            
+            // その他のキー処理
+            if (keysActions[event.code] && !event.repeat) {
+                vehicleSteeringState[keysActions[event.code]] = true;
+            }
+            
+            if (event.code === "KeyR") resetVehicle();
+            // コリジョン表示のトグル
+            if (event.code === "KeyC") {
+                debugMode = !debugMode;
+                if (cannonDebugger) {
+                    cannonDebugger.toggle(debugMode);
+                }
+            }
+            
+            // デバッグメニュー表示のトグル（Tabキー）
+            if (event.code === "Tab") {
+                event.preventDefault(); // デフォルトのタブ動作を防止
+                debugMenuVisible = !debugMenuVisible;
+                updateDebugInfo();
+            }
+            
+            // デバッグモードがオンまたはデバッグメニューが表示されている場合
+            if (debugMode || debugMenuVisible) {
+                // コリジョン位置調整機能
+                // メインボディの上下移動
+                if (event.code === "KeyT") {
+                    // collisionAdjustments.mainBodyY += adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                if (event.code === "KeyG") {
+                    // collisionAdjustments.mainBodyY -= adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                
+                // メインボディの前後移動
+                if (event.code === "KeyY") {
+                    // collisionAdjustments.mainBodyZ += adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                if (event.code === "KeyH") {
+                    // collisionAdjustments.mainBodyZ -= adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                
+                // キャビンの上下移動
+                if (event.code === "KeyU") {
+                    // collisionAdjustments.cabinY += adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                if (event.code === "KeyJ") {
+                    // collisionAdjustments.cabinY -= adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                
+                // スロープの高さ調整
+                if (event.code === "KeyO") {
+                    slopeHeight += adjustmentStep * 2;
+                    if (!useCustomAngle) {
+                        // 高さが変わっても角度は自動計算
+                        slopeAngle = Math.atan2(slopeHeight, slopeLength);
+                    }
+                    updateSlopeGeometry();
+                }
+                if (event.code === "KeyL") {
+                    if (slopeHeight > adjustmentStep * 2) {
+                        slopeHeight -= adjustmentStep * 2;
+                        if (!useCustomAngle) {
+                            // 高さが変わっても角度は自動計算
+                            slopeAngle = Math.atan2(slopeHeight, slopeLength);
+                        }
+                        updateSlopeGeometry();
+                    }
+                }
+                
+                // スロープの角度調整
+                if (event.code === "KeyP") {
+                    useCustomAngle = true; // カスタム角度モードに切り替え
+                    slopeAngle += 0.05; // ラジアン単位で増加
+                    updateSlopeGeometry();
+                }
+                if (event.code === "Semicolon") {
+                    useCustomAngle = true; // カスタム角度モードに切り替え
+                    slopeAngle -= 0.05; // ラジアン単位で減少
+                    updateSlopeGeometry();
+                }
+                
+                // ブレーキ力の調整
+                if (event.code === "KeyB") {
+                    brakeForce += 5;
+                    updateDebugInfo();
+                }
+                if (event.code === "KeyN") {
+                    brakeForce = Math.max(5, brakeForce - 5);
+                    updateDebugInfo();
+                }
+                
+                // カメラ位置の調整
+                if (event.code === "Digit1") {
+                    cameraAdjustments.distance += 1;
+                    updateCameraPosition();
+                }
+                if (event.code === "Digit2") {
+                    cameraAdjustments.distance = Math.max(2, cameraAdjustments.distance - 1);
+                    updateCameraPosition();
+                }
+                if (event.code === "Digit3") {
+                    cameraAdjustments.height += 0.5;
+                    updateCameraPosition();
+                }
+                if (event.code === "Digit4") {
+                    cameraAdjustments.height = Math.max(0.5, cameraAdjustments.height - 0.5);
+                    updateCameraPosition();
+                }
+                if (event.code === "Digit5") {
+                    cameraAdjustments.sideOffset += 0.5;
+                    updateCameraPosition();
+                }
+                if (event.code === "Digit6") {
+                    cameraAdjustments.sideOffset = Math.max(0.5, cameraAdjustments.sideOffset - 0.5);
+                    updateCameraPosition();
+                }
+                
+                // 車両の高さ調整
+                if (event.code === "KeyQ") {
+                    updateVehicleHeight(-0.1);
+                }
+                if (event.code === "KeyE") {
+                    updateVehicleHeight(0.1);
+                }
+                if (event.code === "KeyZ") {
+                    updateVehicleHeight(-vehicleHeightOffset);
+                }
+                
+                // 車両の位置調整
+                if (event.code === "KeyI") {
+                    vehiclePositionOffset.z -= positionStep;
+                    updateVehiclePosition();
+                }
+                if (event.code === "KeyK") {
+                    vehiclePositionOffset.z += positionStep;
+                    updateVehiclePosition();
+                }
+                if (event.code === "KeyJ") {
+                    vehiclePositionOffset.x -= positionStep;
+                    updateVehiclePosition();
+                }
+                if (event.code === "KeyL") {
+                    vehiclePositionOffset.x += positionStep;
+                    updateVehiclePosition();
+                }
+                if (event.code === "KeyU") {
+                    // collisionAdjustments.cabinY += adjustmentStep;
+                    // updateCollisionPositions();
+                }
+                if (event.code === "KeyO") {
+                    vehiclePositionOffset.y -= positionStep;
+                    updateVehiclePosition();
+                }
+                
+
+                if (event.code === "KeyM") {
+                    vehiclePositionOffset = { x: 0, y: 0, z: 0 };
+                    updateVehiclePosition();
+                }
+            }
+        }
+        
+        function onKeyUp(event) {
+            if (keysActions.hasOwnProperty(event.code)) {
+                const action = keysActions[event.code];
+                vehicleSteeringState[action] = false;
+                event.preventDefault();
+            }
+            
+            if (event.code === "Space") {
+                isTurboActive = false;
+            }
+        }
+        
+        function resetVehicle() { 
+            if (chassisBody && vehicle && initialPosition && initialQuaternion) {
+                // 位置と向きを初期化
+                chassisBody.position.set(
+                    initialPosition.x + vehiclePositionOffset.x,
+                    initialPosition.y + vehiclePositionOffset.y,
+                    initialPosition.z + vehiclePositionOffset.z
+                );
+                chassisBody.velocity.setZero();
+                chassisBody.angularVelocity.setZero();
+                chassisBody.quaternion.copy(initialQuaternion);
+                
+                // ホイールの位置もリセット
+                vehicle.updateVehicle(0);
+            }
+        }
+
+        // 車両の高さを更新する関数
+        function updateVehicleHeight(offset) {
+            if (!vehicleMesh || !vehicleBody) return;
+            
+            // オフセットを更新
+            vehicleHeightOffset += offset;
+            
+            // 車両の位置を更新
+            vehicleMesh.position.y = initialVehicleY + vehicleHeightOffset;
+            vehicleBody.position.y = initialVehicleY + vehicleHeightOffset;
+            
+            // デバッグ表示を更新
+            document.getElementById('vehicle-height').textContent = vehicleHeightOffset.toFixed(2);
+            
+            console.log(`車両高さオフセット: ${vehicleHeightOffset.toFixed(2)}m`);
+        }
+
+        // 車両の位置を更新する関数
+        function updateVehiclePosition() {
+            if (vehicle && chassisBody) {
+                // 現在の速度と回転を保持
+                const velocity = chassisBody.velocity.clone();
+                const angularVelocity = chassisBody.angularVelocity.clone();
+                const quaternion = chassisBody.quaternion.clone();
+                
+                // 位置を更新
+                chassisBody.position.set(
+                    initialPosition.x + vehiclePositionOffset.x,
+                    initialPosition.y + vehiclePositionOffset.y,
+                    initialPosition.z + vehiclePositionOffset.z
+                );
+                
+                // 速度と回転を復元
+                chassisBody.velocity.copy(velocity);
+                chassisBody.angularVelocity.copy(angularVelocity);
+                chassisBody.quaternion.copy(quaternion);
+                
+                updateDebugInfo();
+            }
+        }
+
+        // --- 主要ロジック関数 ---
+        function init() {
+            loadingElement = document.getElementById('loading');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // 空色
+
+            // --- カメラ作成 ---
+            const aspect = window.innerWidth / window.innerHeight;
+            camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000); 
+            camera.position.set(7, 5, 8); // 元の鳥瞰視点位置
+            camera.lookAt(0, 0.5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio); 
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.shadowMap.autoUpdate = true;
+            renderer.shadowMap.needsUpdate = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 環境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); 
+            scene.add(ambientLight);
+
+            // 指向性ライト（太陽光）
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 200, 100);
+            directionalLight.castShadow = true;
+
+            // シャドウマップの解像度を上げる
+            directionalLight.shadow.mapSize.width = 4096;
+            directionalLight.shadow.mapSize.height = 4096;
+
+            // シャドウカメラの範囲を広げる
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 500;  // 視野を広げる
+            directionalLight.shadow.camera.left = -200;  // 左側の範囲を広げる
+            directionalLight.shadow.camera.right = 200;  // 右側の範囲を広げる
+            directionalLight.shadow.camera.top = 200;    // 上部の範囲を広げる
+            directionalLight.shadow.camera.bottom = -200; // 下部の範囲を広げる
+
+            // シャドウのバイアスを調整
+            directionalLight.shadow.bias = -0.0005;
+            directionalLight.shadow.normalBias = 0.01;
+
+            // シャドウカメラの視錐台を更新
+            directionalLight.shadow.camera.updateProjectionMatrix();
+            scene.add(directionalLight);
+
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            world.solver.iterations = 30; // ★変更: より正確な計算のために増加
+            world.defaultContactMaterial.friction = 0.2; 
+
+            initialPosition = new CANNON.Vec3(0, 1.5, 0); 
+            initialQuaternion = new CANNON.Quaternion(); 
+            // initialQuaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), 0); // X軸正が前方
+
+            createGround();
+            loadCarModelAndCreateVehicle();
+
+            // Cannonデバッガーの初期化
+            cannonDebugger = new CannonDebugger(scene, world);
+            
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+            
+            loadingManager.onStart = function ( ) { if(loadingElement) loadingElement.style.display = 'block'; };
+            loadingManager.onLoad = function() { 
+                if (loadingElement) loadingElement.style.display = 'none';
+                console.log('モデル読み込み完了!');
+                // 車両の初期化は loadCarModelAndCreateVehicle 内で行う
+            };
+            loadingManager.onError = function ( url ) { if(loadingElement) loadingElement.textContent = '読み込みエラー'; console.error( 'Error loading ' + url ); };
+
+            animate();
+        }
+        
+        function loadCarModelAndCreateVehicle() {
+            gltfLoader.load(modelUrl, (gltf) => {
+                carMesh = gltf.scene;
+                const box = new THREE.Box3().setFromObject(carMesh);
+                const size = box.getSize(new THREE.Vector3());
+                
+                let scaleFactor = chassisDepth / size.x; 
+                if (size.x === 0 || !isFinite(scaleFactor) || scaleFactor <=0) { 
+                    scaleFactor = 1; 
+                    if (size.y > 0 && isFinite(chassisHeight / size.y)) scaleFactor = chassisHeight / size.y;
+                    else if (size.z > 0 && isFinite(chassisWidth / size.z)) scaleFactor = chassisWidth / size.z;
+                    else scaleFactor = 1;
+                }
+                
+                if (isNaN(scaleFactor) || !isFinite(scaleFactor) || scaleFactor <= 0) {
+                    scaleFactor = 0.1; 
+                }
+                carMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+                carMesh.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true; 
+                    }
+                });
+                scene.add(carMesh);
+                
+                // 物理エンジンの設定
+                createVehiclePhysics();
+                
+                // 車両の初期位置と回転を保存
+                initialPosition = new CANNON.Vec3(0, 1.5, 0);
+                initialQuaternion = new CANNON.Quaternion();
+                
+                // 車両の初期位置を設定
+                if (chassisBody) {
+                    chassisBody.position.copy(initialPosition);
+                    chassisBody.quaternion.copy(initialQuaternion);
+                    
+                    // 車両の初期化が完了したことを通知
+                    console.log('車両の初期化が完了しました');
+                    
+                    // アイテムを生成
+                    createInitialItems();
+                } else {
+                    console.error('chassisBody の初期化に失敗しました');
+                }
+            }, undefined, (error) => {
+                console.error('モデルの読み込みに失敗しました:', error);
+            });
+        }
+
+        function createVehiclePhysics() {
+            if (!groundBody || !groundBody.material) {
+                console.error("致命的エラー: groundBody が未定義。"); return;
+            }
+            if (!initialPosition || !initialQuaternion) {
+                 console.error("致命的エラー: initialPosition または initialQuaternion が未定義。"); return;
+            }
+
+            const chassisMaterialCannon = new CANNON.Material("chassis");
+            
+            // 車の複合コリジョンの作成
+            chassisBody = new CANNON.Body({ mass: massVehicle, material: chassisMaterialCannon });
+            
+            // メインボディ - シャーシ本体（車幅からはみ出さないように調整）
+            const mainChassisShape = new CANNON.Box(new CANNON.Vec3(
+                chassisDepth * 0.4, 
+                chassisHeight * 0.3, 
+                // 車幅からはみ出さないように調整
+                chassisWidth * 0.45
+            ));
+            
+            // キャビン（上部）- 少し狭く、高さがある（車幅からはみ出さないように調整）
+            const cabinShape = new CANNON.Box(new CANNON.Vec3(
+                chassisDepth * 0.35, 
+                chassisHeight * 0.25, 
+                // 車幅からはみ出さないように調整
+                chassisWidth * 0.4
+            ));
+            
+            /* コメントアウト: フロント部（エンジンルーム）
+            const frontShape = new CANNON.Box(new CANNON.Vec3(
+                chassisDepth * 0.25, 
+                chassisHeight * 0.2, 
+                // 車幅からはみ出さないように調整
+                chassisWidth * 0.42
+            ));
+            */
+            
+            /* コメントアウト: リア部（トランク）
+            const rearShape = new CANNON.Box(new CANNON.Vec3(
+                chassisDepth * 0.2, 
+                chassisHeight * 0.22, 
+                // 車幅からはみ出さないように調整
+                chassisWidth * 0.42
+            ));
+            */
+            
+            // 本体の位置は中心（調整可能）
+            chassisBody.addShape(mainChassisShape, 
+                new CANNON.Vec3(0, 0, 0)
+            );
+            
+            // キャビンを上部中央に配置（調整可能）
+            chassisBody.addShape(cabinShape, 
+                new CANNON.Vec3(0, 1.23 * 0.3, 0)
+            );
+            
+            /* コメントアウト: フロント部を前に配置
+            chassisBody.addShape(frontShape, 
+                new CANNON.Vec3(chassisDepth * 0.3, 0, 0)
+            );
+            */
+            
+            /* コメントアウト: リア部を後ろに配置
+            chassisBody.addShape(rearShape, 
+                new CANNON.Vec3(-chassisDepth * 0.3, 0, 0)
+            );
+            */
+            
+            chassisBody.position.copy(initialPosition);
+            chassisBody.quaternion.copy(initialQuaternion); 
+            chassisBody.angularDamping = 0.3; // ★変更: スピンしやすくするために少し下げる
+            world.addBody(chassisBody);
+
+            vehicle = new CANNON.RaycastVehicle({
+                chassisBody: chassisBody,
+                indexRightAxis: 2, indexForwardAxis: 0, indexUpAxis: 1
+            });
+
+            const wheelOptions = {
+                radius: wheelRadius,
+                directionLocal: new CANNON.Vec3(0, -1, 0), 
+                suspensionStiffness: 30,    // ★変更: 剛性を増加
+                suspensionRestLength: 0.1,  
+                frictionSlip: 20.0,         // ★変更: 元は1.2
+                dampingRelaxation: 2.5,    // ★変更: ダンピングを増加
+                dampingCompression: 2.8,   // ★変更: ダンピングを増加
+                maxSuspensionForce: 400000, // ★変更: 最大サス力を増加
+                rollInfluence: 0.1,        // ★変更: ロール影響を減少
+                axleLocal: new CANNON.Vec3(),
+                chassisConnectionPointLocal: new CANNON.Vec3(),
+                maxSuspensionTravel: 0.3,   // ★変更: 最大ストロークを増加
+                customSlidingRotationalSpeed: -100,
+                useCustomSlidingRotationalSpeed: true,
+            };
+            const wheelMaterialCannon = new CANNON.Material("wheel");
+            const wheelYPos = (-chassisHeight / 2) + (wheelRadius - wheelOptions.suspensionRestLength * 0.4); 
+
+            wheelOptions.isFrontWheel = true;
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.4, wheelYPos, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.4, wheelYPos, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            wheelOptions.isFrontWheel = false;
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.42, wheelYPos, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.42, wheelYPos, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            vehicle.addToWorld(world);
+            
+            const wheel_ground = new CANNON.ContactMaterial(
+                wheelMaterialCannon, groundBody.material,
+                { friction: 1.5, restitution: 0.01, contactEquationStiffness: 1e8, // ★変更: より硬く
+                  frictionEquationStiffness: 1e8, frictionEquationRelaxation: 2 }  // ★変更: 摩擦係数調整
+            );
+            world.addContactMaterial(wheel_ground);
+
+            const chassis_ground = new CANNON.ContactMaterial(
+                chassisMaterialCannon, groundBody.material,
+                { friction: 0.1, restitution: 0.0, contactEquationStiffness: 1e8 } // ★変更: より硬く
+            );
+            world.addContactMaterial(chassis_ground);
+        }
+        
+
+        
+        // コリジョン位置を更新する関数（デバッグ用にコメントアウト）
+        /*
+        function updateCollisionPositions() {
+            if (vehicle && chassisBody) {
+                // 既存のボディから新しいボディを作成
+                const oldPosition = new CANNON.Vec3().copy(chassisBody.position);
+                const oldQuaternion = new CANNON.Quaternion().copy(chassisBody.quaternion);
+                const oldVelocity = new CANNON.Vec3().copy(chassisBody.velocity);
+                const oldAngularVelocity = new CANNON.Vec3().copy(chassisBody.angularVelocity);
+                
+                // 古いボディをワールドから削除
+                world.removeBody(chassisBody);
+                
+                // 車の物理ボディを再作成
+                createVehiclePhysics();
+                
+                // 元の状態を復元
+                chassisBody.position.copy(oldPosition);
+                chassisBody.quaternion.copy(oldQuaternion);
+                chassisBody.velocity.copy(oldVelocity);
+                chassisBody.angularVelocity.copy(oldAngularVelocity);
+                
+                // デバッグ情報更新
+                updateDebugInfo();
+            }
+        }
+        */
+        
+        // デバッグ情報を表示する関数
+        function updateDebugInfo() {
+            // 既存のデバッグ情報要素を削除
+            const existingDebugInfo = document.getElementById('debug-info');
+            if (existingDebugInfo) {
+                document.body.removeChild(existingDebugInfo);
+            }
+            
+            if (!debugMenuVisible) return;
+            
+            // デバッグ情報表示用のdiv要素を作成
+            const debugInfoDiv = document.createElement('div');
+            debugInfoDiv.id = 'debug-info';
+            debugInfoDiv.style.position = 'absolute';
+            debugInfoDiv.style.top = '10px';
+            debugInfoDiv.style.right = '10px';
+            debugInfoDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            debugInfoDiv.style.color = 'white';
+            debugInfoDiv.style.padding = '10px';
+            debugInfoDiv.style.borderRadius = '5px';
+            debugInfoDiv.style.fontFamily = 'monospace';
+            debugInfoDiv.style.zIndex = '100';
+            debugInfoDiv.style.maxWidth = '400px';
+            debugInfoDiv.style.maxHeight = '80vh';
+            debugInfoDiv.style.overflowY = 'auto';
+            
+            let speedInfo = "";
+            if (vehicle) {
+                const speedKmh = vehicle.currentVehicleSpeedKmHour.toFixed(1);
+                speedInfo = `<div>速度: ${speedKmh} km/h</div>`;
+            }
+            
+            // デバッグ情報を表示
+            debugInfoDiv.innerHTML = `
+                <h3>デバッグ情報</h3>
+                ${speedInfo}
+                <h4>コリジョン調整</h4>
+                <div>メインボディY: 0.0 (T/G)</div>
+                <div>メインボディZ: 0.0 (Y/H)</div>
+                <div>キャビンY: 1.23 * 0.3 (U/J)</div>
+                <h4>スロープ設定</h4>
+                <div>スロープ高さ: ${slopeHeight.toFixed(2)} (O/L)</div>
+                <div>スロープ角度: ${(slopeAngle * 180 / Math.PI).toFixed(1)}° (P/;)</div>
+                <div>角度モード: ${useCustomAngle ? "手動" : "自動"}</div>
+                <h4>ブレーキ設定</h4>
+                <div>ブレーキ力: ${brakeForce.toFixed(1)} (B/N)</div>
+                <h4>カメラ調整</h4>
+                <div>距離: ${cameraAdjustments.distance.toFixed(1)} (1/2)</div>
+                <div>高さ: ${cameraAdjustments.height.toFixed(1)} (3/4)</div>
+                <div>横オフセット: ${cameraAdjustments.sideOffset.toFixed(1)} (5/6)</div>
+                <h4>車両高さ</h4>
+                <div>車両高さ: ${vehicleHeightOffset.toFixed(2)}m (Q/E/Z)</div>
+                <h4>車両位置</h4>
+                <div>車両位置: X:${chassisBody.position.x.toFixed(2)}m, Y:${chassisBody.position.y.toFixed(2)}m, Z:${chassisBody.position.z.toFixed(2)}m</div>
+
+            `;
+            
+            document.body.appendChild(debugInfoDiv);
+        }
+        
+        // カメラ位置を更新する関数
+        function updateCameraPosition() {
+            if (!camera || !chassisBody) return;
+            updateDebugInfo();
+        }
+
+        function updateVehicle() {
+            if (!vehicle || !chassisBody) return;
+
+            const { acceleration, braking, left, right } = vehicleSteeringState;
+            const localVelocity = chassisBody.vectorToLocalFrame(chassisBody.velocity);
+            const forwardSpeed = localVelocity.x; 
+            const absForwardSpeed = Math.abs(forwardSpeed);
+
+            let currentEngineForce = engineBaseForce;
+            if (absForwardSpeed > forceHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - forceHighSpeedThreshold;
+                const factor = Math.max(forceMinFactorAtHighSpeed, 1 - speedExcess / forceReductionSpeedRange);
+                currentEngineForce = engineBaseForce * factor; 
+            }
+            
+            // ターボが有効な場合はエンジン力を増加
+            if (isTurboActive) {
+                currentEngineForce *= turboMultiplier;
+                // ターボ使用時のエフェクト（オプション）
+                if (Math.random() > 0.7) {
+                    // ターボ使用時の視覚効果（例：排気の炎など）
+                    // ここにエフェクトのコードを追加できます
+                }
+            }
+            
+            let currentMaxSteer = baseMaxSteerVal;
+            if (absForwardSpeed > steerHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - steerHighSpeedThreshold;
+                const factor = Math.max(steerMinFactorAtHighSpeed, 1 - speedExcess / steerReductionSpeedRange);
+                currentMaxSteer = baseMaxSteerVal * factor; 
+            }
+
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.applyEngineForce(0, i);
+                vehicle.setBrake(0, i);
+
+                if (i === 2 || i === 3) { 
+                    if (acceleration) {
+                        vehicle.applyEngineForce(currentEngineForce, i);
+                    }
+                }
+
+                if (braking) {
+                    if (forwardSpeed > 0.1) { 
+                        vehicle.setBrake(brakeForce, i);
+                    } else { 
+                        if (i === 2 || i === 3) {
+                            vehicle.applyEngineForce(-currentEngineForce * 0.6, i); 
+                        }
+                    }
+                }
+            }
+
+            const steerWheelIndices = [0, 1];
+            if (left) {
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[1]);
+            } else if (right) {
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[1]);
+            } else {
+                vehicle.setSteeringValue(0, steerWheelIndices[0]);
+                vehicle.setSteeringValue(0, steerWheelIndices[1]);
+            }
+        }
+
+        // 車両の安定化トルクを適用する関数
+        function applyStabilization() {
+            if (!chassisBody) return;
+            
+            // 現在の上向きベクトルを取得
+            const up = new CANNON.Vec3(0, 1, 0);
+            const currentUp = new CANNON.Vec3(0, 1, 0);
+            chassisBody.vectorToWorldFrame(up, currentUp);
+            
+            // 上向きベクトルとの角度を計算
+            const angle = Math.acos(up.dot(currentUp));
+            const maxAngle = Math.PI * 0.3; // 許容最大角度（ラジアン）
+            
+            // 角度が大きすぎる場合に補正トルクを加える
+            if (angle > 0.1) { // わずかに傾いた時点で補正を開始
+                const axis = new CANNON.Vec3();
+                axis.cross(up, currentUp);
+                
+                // 補正の強さを調整（角度に比例）
+                const strength = Math.min(angle * 0.5, 1.0);
+                axis.scale(strength, axis);
+                
+                // 車体にトルクを加える
+                chassisBody.torque.vadd(axis, chassisBody.torque);
+            }
+        }
+        
+        // 車両の反転を検知して自動で復帰
+        function checkAndRecoverVehicle() {
+            if (!chassisBody) return;
+            
+            // 上向きベクトルを取得
+            const up = new CANNON.Vec3(0, 1, 0);
+            const currentUp = new CANNON.Vec3(0, 1, 0);
+            chassisBody.vectorToWorldFrame(up, currentUp);
+            
+            // 上下が逆さまになっていいるかチェック（Y成分が負の場合）
+            if (currentUp.y < -0.5) {
+                // 車体を少し上に持ち上げる
+                chassisBody.position.y += 0.5;
+                
+                // 車体を直立させる
+                chassisBody.quaternion.set(0, 0, 0, 1);
+                
+                // 速度をリセット（少しだけ残す）
+                chassisBody.velocity.scale(0.5, chassisBody.velocity);
+                chassisBody.angularVelocity.scale(0.1, chassisBody.angularVelocity);
+                
+                console.log('車体を自動復帰しました');
+            }
+        }
+        
+        let lastTime = 0;
+        function animate(time) {
+            // デルタタイムを計算（秒単位）
+            const delta = Math.min(0.1, (time - lastTime) / 1000);
+            lastTime = time;
+            
+            // 車両の安定化と復帰チェック
+            if (chassisBody) {
+                applyStabilization();
+                checkAndRecoverVehicle();
+                checkItemCollection();
+                updateTurboIndicator();
+            }
+            
+            // アイテムのアニメーションを更新
+            items.forEach(item => {
+                if (!item.collected && item.mesh) {
+                    // カメラの方を向かせる
+                    item.mesh.lookAt(camera.position);
+                    // アニメーションを更新
+                    if (item.update) {
+                        item.update(delta);
+                    }
+                }
+            });
+            
+            requestAnimationFrame(animate);
+            
+            // より安定した物理計算のために、小さいステップに分割して計算
+            const timeStep = 1 / 60;
+            const maxSubSteps = 5; // ★変更: サブステップを増加
+            world.step(timeStep, timeStep, maxSubSteps);
+            
+            if (vehicle) updateVehicle(); 
+
+            if (carMesh && chassisBody) { 
+                carMesh.position.copy(chassisBody.position);
+                carMesh.quaternion.copy(chassisBody.quaternion);
+                
+                // 高い視点からの固定カメラアングル
+                if (camera) {
+                    // 車の位置だけを追跡し、向きは考慮しない
+                    // 常に同じ方向（世界座標系）から車を見る
+                    const cameraPosition = new THREE.Vector3(
+                        carMesh.position.x - cameraAdjustments.distance, // 常に-X方向（固定方向）から見る
+                        carMesh.position.y + cameraAdjustments.height,   // 常に高い位置から
+                        carMesh.position.z + cameraAdjustments.sideOffset // 横オフセット（必要に応じて）
+                    );
+                    
+                    // カメラ位置を滑らかに更新
+                    camera.position.lerp(cameraPosition, cameraAdjustments.followFactor);
+                    
+                    // 常に車の現在位置を見る（車の回転は関係なし）
+                    camera.lookAt(carMesh.position);
+                }
+            }
+            
+            // デバッグモードがオンの場合はコリジョン表示を更新
+            if (debugMode && cannonDebugger) {
+                cannonDebugger.update();
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // アイテムの種類と見た目 - 趣味を表現する様々な絵文字
+        const itemTypes = [
+            // スポーツ
+            { emoji: '⚽', color: '#ff6b6b', name: 'サッカーボール' },  
+            { emoji: '🏀', color: '#ff9500', name: 'バスケットボール' },
+            { emoji: '🎾', color: '#34c759', name: 'テニス' },
+            { emoji: '🏓', color: '#ffcc00', name: '卓球' },
+            { emoji: '🎳', color: '#ff2d55', name: 'ボウリング' },
+            
+            // アウトドア
+            { emoji: '🏕️', color: '#5ac8fa', name: 'キャンプ' },
+            { emoji: '🚴', color: '#ff9500', name: 'サイクリング' },
+            { emoji: '🎣', color: '#007aff', name: '釣り' },
+            { emoji: '🏔️', color: '#8e8e93', name: '登山' },
+            { emoji: '🎿', color: '#007aff', name: 'スキー' },
+            
+            // インドア
+            { emoji: '📚', color: '#ff9500', name: '読書' },
+            { emoji: '🎮', color: '#5856d6', name: 'ゲーム' },
+            { emoji: '🧩', color: '#ffcc00', name: 'パズル' },
+            { emoji: '🎨', color: '#ff2d55', name: '絵画' },
+            { emoji: '🎼', color: '#ff9500', name: '音楽' },
+            
+            // クリエイティブ
+            { emoji: '📷', color: '#007aff', name: '写真' },
+            { emoji: '✏️', color: '#ff2d55', name: 'イラスト' },
+            { emoji: '🎬', color: '#000000', name: '映画' },
+            { emoji: '🎭', color: '#ff2d55', name: '演劇' },
+            { emoji: '🎤', color: '#ff2d55', name: 'カラオケ' },
+            
+            // その他の趣味
+            { emoji: '🍳', color: '#ff9500', name: '料理' },
+            { emoji: '☕', color: '#8e8e93', name: 'カフェ巡り' },
+            { emoji: '🛍️', color: '#ff2d55', name: 'ショッピング' },
+            { emoji: '✈️', color: '#007aff', name: '旅行' },
+            { emoji: '🐕', color: '#8e8e93', name: 'ペット' }
+        ];
+        
+        // アイテムオブジェクトの生成と管理
+        let items = [];
+        let collectedItems = []; // 取得したアイテムを保持する配列（最大3つ）
+        const MAX_ITEMS = 10;    // 画面上に存在するアイテムの最大数
+        
+        // 取得したアイテムの表示を更新する関数
+        // ターボインジケーターの表示を更新
+        function updateTurboIndicator() {
+            const indicator = document.getElementById('turbo-indicator');
+            if (indicator) {
+                indicator.style.display = isTurboActive ? 'block' : 'none';
+                
+                // ターボ使用時に点滅エフェクトを追加
+                if (isTurboActive) {
+                    const blink = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
+                    indicator.style.opacity = 0.7 + blink * 0.3;
+                } else {
+                    indicator.style.opacity = 1.0;
+                }
+            }
+        }
+        
+        function updateCollectedItemsDisplay() {
+            // 各スロットを更新
+            for (let i = 0; i < 3; i++) {
+                const slot = document.getElementById(`slot-${i+1}`);
+                if (slot) {
+                    if (i < collectedItems.length) {
+                        const item = collectedItems[i];
+                        slot.textContent = item.emoji;
+                        slot.setAttribute('data-tooltip', item.name);
+                        slot.classList.add('filled');
+                    } else {
+                        slot.textContent = '';
+                        slot.removeAttribute('data-tooltip');
+                        slot.classList.remove('filled');
+                    }
+                }
+            }
+        }
+        
+        function createItem(position, itemType) {
+            // シンプルな平面ジオメトリを使用
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            
+            // キャンバスを作成して絵文字を描画
+            const canvas = document.createElement('canvas');
+            const size = 256;
+            canvas.width = size;
+            canvas.height = size;
+            const context = canvas.getContext('2d');
+            
+            // 背景を透明に
+            context.fillStyle = 'rgba(0, 0, 0, 0)';
+            context.fillRect(0, 0, size, size);
+            
+            // テキストを描画
+            context.font = '200px Arial';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillStyle = itemType.color;
+            context.fillText(itemType.emoji, size / 2, size / 2);
+            
+            // テクスチャを作成
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            
+            // マテリアルを作成
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            
+            // 影用の平面ジオメトリを作成
+            const shadowGeometry = new THREE.CircleGeometry(0.8, 16);
+            const shadowMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x000000,
+                transparent: true,
+                opacity: 0.3
+            });
+            
+            // 影のメッシュを作成
+            const shadowMesh = new THREE.Mesh(shadowGeometry, shadowMaterial);
+            shadowMesh.rotation.x = -Math.PI / 2; // 地面に平らに
+            shadowMesh.position.set(position.x, 0.1, position.z); // 地面の少し上に配置
+            
+            // メインのアイテムメッシュを作成
+            const itemMesh = new THREE.Mesh(geometry, material);
+            itemMesh.position.copy(position);
+            itemMesh.scale.set(1, 1, 1);
+            
+            // 影をキャスト・受ける設定
+            itemMesh.castShadow = true;
+            shadowMesh.receiveShadow = true;
+            
+            // 物理ボディを作成（球体のコリジョン）
+            const shape = new CANNON.Sphere(0.8);
+            const itemBody = new CANNON.Body({
+                mass: 0, // 動かないように質量0に設定
+                position: new CANNON.Vec3(position.x, position.y, position.z),
+                shape: shape,
+                collisionFilterGroup: 2, // アイテムの衝突グループ
+                collisionFilterMask: 1    // 車両とのみ衝突
+            });
+            
+            // アニメーション用のプロパティを追加
+            itemMesh.userData = {
+                time: 0,
+                initialY: position.y
+            };
+            
+            // アイテムオブジェクトを作成
+            const item = {
+                mesh: itemMesh,
+                shadow: shadowMesh,  // 影の参照を追加
+                body: itemBody,
+                type: itemType,  // アイテムの種類を保存
+                collected: false,
+                update: function(delta) {
+                    // 上下にゆっくりと浮遊するアニメーション
+                    this.mesh.userData.time += delta;
+                    const floatHeight = Math.sin(this.mesh.userData.time * 2) * 0.2;
+                    this.mesh.position.y = this.mesh.userData.initialY + floatHeight;
+                    
+                    // 影のサイズを調整（浮き上がるほど小さく）
+                    if (this.shadow) {
+                        const scale = 1.0 - floatHeight * 0.3;
+                        this.shadow.scale.set(scale, scale, scale);
+                        this.shadow.position.x = this.mesh.position.x;
+                        this.shadow.position.z = this.mesh.position.z;
+                    }
+                    
+                    // 回転アニメーション
+                    this.mesh.rotation.y += delta;
+                }
+            };
+            
+            // アイテムと影をシーンに追加
+            scene.add(itemMesh);
+            scene.add(shadowMesh);
+            items.push(item);
+            return item;
+        }
+
+        function checkItemCollection() {
+            // アイテムがなければ何もしない
+            if (!items || items.length === 0) {
+                return;
+            }
+            
+            // 車両の位置情報を取得（chassisBodyが存在するか確認）
+            if (!chassisBody) {
+                console.log('車両ボディが初期化されていません');
+                return;
+            }
+            
+            const chassisPosition = chassisBody.position;
+            
+            // すべてのアイテムをチェック
+            for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+                
+                // アイテムが既に取得済みの場合はスキップ
+                if (item.collected || !item.body) {
+                    continue;
+                }
+                
+                // 車両とアイテムの距離を計算
+                const distance = chassisPosition.distanceTo(item.body.position);
+                
+                // デバッグ用にコンソールに表示
+                console.log('アイテムチェック:', 
+                    'タイプ:', item.type.emoji,
+                    '距離:', distance.toFixed(2) + 'm');
+                
+                // 衝突判定（距離が2.7m以下で取得）
+                if (distance <= 2.7) {
+                    item.collected = true;
+                    scene.remove(item.mesh);
+                    if (item.shadow) scene.remove(item.shadow);
+                    world.removeBody(item.body);
+                    
+                    // アイテムを配列から削除
+                    items.splice(i, 1);
+                    
+                    // アイテムをスロットに追加
+                    if (collectedItems.length >= 3) {
+                        // スロットが一杯の場合は一番古いアイテムを削除
+                        collectedItems.shift();
+                    }
+                    // 取得したアイテムの情報を追加
+                    collectedItems.push({
+                        emoji: item.type.emoji,
+                        name: item.type.name || 'アイテム'
+                    });
+                    
+                    // 表示を更新
+                    updateCollectedItemsDisplay();
+                    
+                    // コンソールに取得メッセージを表示
+                    console.log(`アイテムを取得しました: ${item.type.emoji}  スロット: ${collectedItems.length}/3`);
+                    
+                    // 新しいアイテムをランダムな位置に再生成
+                    setTimeout(() => {
+                        if (items.length < MAX_ITEMS) {
+                            const angle = Math.random() * Math.PI * 2;
+                            const radius = 10 + Math.random() * 10; // 10-20mの距離
+                            
+                            const offsetX = Math.cos(angle) * radius;
+                            const offsetZ = Math.sin(angle) * radius;
+                            
+                            const itemPosition = new THREE.Vector3(
+                                chassisBody.position.x + offsetX,
+                                0.5,
+                                chassisBody.position.z + offsetZ
+                            );
+                            
+                            const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+                            createItem(itemPosition, itemType);
+                        }
+                    }, 1000);
+                    
+                    // 1フレームで1つのアイテムのみ取得
+                    break;
+                }
+            }
+        }
+
+        // 初期化時にアイテムを生成
+        function createInitialItems() {
+            if (!chassisBody) {
+                console.error('車両ボディが初期化されていません');
+                return;
+            }
+        
+            console.log('初期アイテムを生成します...');
+            
+            // 既存のアイテムをクリア
+            items.forEach(item => {
+                if (item.mesh) scene.remove(item.mesh);
+                if (item.body) world.removeBody(item.body);
+            });
+            items = [];
+            
+            // 10個のアイテムを2重の円で配置
+            // 内側の円に5個配置
+            for (let i = 0; i < 5; i++) {
+                const angle = (i / 5) * Math.PI * 2;
+                const radius = 12; // 内側の円の半径
+                const x = Math.sin(angle) * radius;
+                const z = Math.cos(angle) * radius;
+                const itemPosition = new THREE.Vector3(x, 1, z);
+                // ランダムなアイテムタイプを選択
+                const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+                // アイテムを作成してシーンに追加
+                const item = createItem(itemPosition, itemType);
+                if (item && item.mesh) {
+                    item.mesh.scale.set(0.5, 0.5, 1);  // サイズを小さく調整
+                    items.push(item);
+                    console.log('内側の円にアイテムを生成しました:', itemPosition);
+                }
+            }
+            
+            // 外側の円に5個配置（内側のアイテムと重ならないように少しずらす）
+            for (let i = 0; i < 5; i++) {
+                const angle = ((i + 0.5) / 5) * Math.PI * 2; // 内側のアイテムと重ならないように0.5ずらす
+                const radius = 20; // 外側の円の半径
+                const x = Math.sin(angle) * radius;
+                const z = Math.cos(angle) * radius;
+                const itemPosition = new THREE.Vector3(x, 1, z);
+                // ランダムなアイテムタイプを選択
+                const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+                // アイテムを作成してシーンに追加
+                const item = createItem(itemPosition, itemType);
+                if (item && item.mesh) {
+                    item.mesh.scale.set(0.5, 0.5, 1);  // サイズを小さく調整
+                    items.push(item);
+                    console.log('外側の円にアイテムを生成しました:', itemPosition);
+                }
+            }
+        }
+
+// Cannon.jsデバッグビジュアライザーの実装
+class CannonDebugger {
+    constructor(scene, world, options = {}) {
+        this.scene = scene;
+        this.world = world;
+        
+        this.meshes = [];
+        this._meshCache = new Map();
+        
+        // デフォルトのマテリアル
+        this.material = new THREE.MeshBasicMaterial({
+            color: options.color || 0x00ff00,
+            wireframe: options.wireframe !== undefined ? options.wireframe : true,
+            opacity: options.opacity || 0.6,
+            transparent: options.transparent !== undefined ? options.transparent : true
+                });
+                
+                // 特殊なマテリアル（車体用）
+                this.chassisMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xff3333, // 赤色
+                    wireframe: true,
+                    opacity: 0.7,
+                    transparent: true
+                });
+                
+                // 特殊なマテリアル（地面用）
+                this.groundMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x3333ff, // 青色
+                    wireframe: true,
+                    opacity: 0.3,
+                    transparent: true
+                });
+                
+                // 特殊なマテリアル（ホイール用）
+                this.wheelMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xffff00, // 黄色
+                    wireframe: true,
+                    opacity: 0.7,
+                    transparent: true
+                });
+                
+                this._enabled = false;
+            }
+            
+            update() {
+                // 表示中のメッシュをすべて削除
+                this._removeAllVisuals();
+                
+                // 有効になっている場合のみ表示
+                if (this._enabled) {
+                    // ホイールのコリジョンを追加表示（特別処理）
+                    if (vehicle && vehicle.wheelInfos) {
+                        vehicle.wheelInfos.forEach((wheelInfo, i) => {
+                            if (!wheelInfo.raycastResult.hasHit) return;
+                            
+                            // ホイールのレイキャスト結果に基づいて、ホイールの実際の位置を計算
+                            const wheelBody = new CANNON.Body({
+                                mass: 0
+                            });
+                            
+                            // 球体の代わりに車幅と同じ長さの円柱を使用
+                            const wheelShape = new CANNON.Cylinder(
+                                wheelRadius,  // 上部半径
+                                wheelRadius,  // 下部半径
+                                chassisWidth, // 車幅と同じ長さに
+                                16           // セグメント数
+                            );
+                            
+                            // 円柱を横向きにするための回転
+                            const q = new CANNON.Quaternion();
+                            q.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), Math.PI / 2);
+                            
+                            // 形状を追加（回転を適用）
+                            wheelBody.addShape(wheelShape, new CANNON.Vec3(), q);
+                            
+                            // ホイールの位置を設定
+                            const wheelPos = wheelInfo.raycastResult.hitPointWorld;
+                            if (wheelPos) {
+                                wheelBody.position.copy(wheelPos);
+                                // 地面からホイール半径分上げる
+                                wheelBody.position.vadd(new CANNON.Vec3(0, wheelRadius, 0), wheelBody.position);
+                                this._updateMesh(wheelBody, wheelShape, 0, this.wheelMaterial);
+                            }
+                        });
+                    }
+                
+                    // ワールドのすべての物理ボディを処理
+                    this.world.bodies.forEach(body => {
+                        // 適切なマテリアルを選択
+                        let material = this.material;
+                        
+                        if (body === chassisBody) {
+                            material = this.chassisMaterial;
+                        } else if (body === groundBody) {
+                            material = this.groundMaterial;
+                        } else if (vehicle && vehicle.wheelBodies && vehicle.wheelBodies.includes(body)) {
+                            material = this.wheelMaterial;
+                        }
+                        
+                        body.shapes.forEach((shape, shapeIndex) => {
+                            this._updateMesh(body, shape, shapeIndex, material);
+                        });
+                    });
+                }
+            }
+            
+            _removeAllVisuals() {
+                // すべてのメッシュをシーンから削除
+                this.meshes.forEach(mesh => {
+                    this.scene.remove(mesh);
+                });
+                this.meshes.length = 0;
+            }
+            
+            _getMesh(shape, material) {
+                // シェイプとマテリアルの組み合わせをキーとして使用
+                const key = shape.id + '_' + (material ? material.uuid : 'default');
+                let mesh = this._meshCache.get(key);
+                
+                if (!mesh) {
+                    mesh = this._createMesh(shape, material);
+                    if (mesh) {
+                        this._meshCache.set(key, mesh);
+                    }
+                }
+                
+                // メッシュをシーンに追加
+                if (mesh) {
+                    this.scene.add(mesh);
+                    this.meshes.push(mesh);
+                }
+                
+                return mesh;
+            }
+            
+            _createMesh(shape, material) {
+                let geometry;
+                let mesh;
+                const finalMaterial = material || this.material;
+                
+                switch (shape.type) {
+                    case CANNON.Shape.types.BOX:
+                        geometry = new THREE.BoxGeometry(
+                            shape.halfExtents.x * 2,
+                            shape.halfExtents.y * 2,
+                            shape.halfExtents.z * 2
+                        );
+                        mesh = new THREE.Mesh(geometry, finalMaterial);
+                        break;
+                        
+                    case CANNON.Shape.types.SPHERE:
+                        geometry = new THREE.SphereGeometry(shape.radius, 16, 16);
+                        mesh = new THREE.Mesh(geometry, finalMaterial);
+                        break;
+                        
+                    case CANNON.Shape.types.PLANE:
+                        geometry = new THREE.PlaneGeometry(100, 100, 10, 10);
+                        mesh = new THREE.Mesh(geometry, finalMaterial);
+                        break;
+                        
+                    case CANNON.Shape.types.CYLINDER:
+                        geometry = new THREE.CylinderGeometry(
+                            shape.radiusTop,
+                            shape.radiusBottom,
+                            shape.height,
+                            32
+                        );
+                        mesh = new THREE.Mesh(geometry, finalMaterial);
+                        // Cannonの円柱はY軸に沿っているが、Three.jsは異なるので回転
+                        const quat = new THREE.Quaternion();
+                        quat.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+                        mesh.quaternion.copy(quat);
+                        break;
+                        
+                    default:
+                        // サポートしていない形状
+                        return null;
+                }
+                
+                return mesh;
+            }
+            
+            _updateMesh(body, shape, shapeIndex, material) {
+                let mesh = this._getMesh(shape, material);
+                
+                if (!mesh) {
+                    return;
+                }
+                
+                // ボディの位置と回転に合わせる
+                if (body.shapeOffsets && body.shapeOffsets[shapeIndex] && body.shapeOrientations && body.shapeOrientations[shapeIndex]) {
+                    // CANNON.jsのVec3を THREE.jsのVector3に変換
+                    const pos = new THREE.Vector3(
+                        body.position.x,
+                        body.position.y,
+                        body.position.z
+                    );
+                    
+                    // シェイプオフセットを適用
+                    const shapeOffset = body.shapeOffsets[shapeIndex];
+                    const offsetPos = new THREE.Vector3(
+                        pos.x + shapeOffset.x,
+                        pos.y + shapeOffset.y,
+                        pos.z + shapeOffset.z
+                    );
+                    mesh.position.copy(offsetPos);
+                    
+                    // ボディの回転とシェイプの回転を適用
+                    const bodyQuat = new THREE.Quaternion(
+                        body.quaternion.x,
+                        body.quaternion.y,
+                        body.quaternion.z,
+                        body.quaternion.w
+                    );
+                    
+                    const shapeOrientation = body.shapeOrientations[shapeIndex];
+                    const shapeQuat = new THREE.Quaternion(
+                        shapeOrientation.x,
+                        shapeOrientation.y,
+                        shapeOrientation.z,
+                        shapeOrientation.w
+                    );
+                    
+                    // 回転を組み合わせる
+                    const finalQuat = bodyQuat.multiply(shapeQuat);
+                    mesh.quaternion.copy(finalQuat);
+                } else {
+                    // シェイプオフセットがない場合は直接ボディの位置と回転を使用
+                    mesh.position.set(
+                        body.position.x,
+                        body.position.y,
+                        body.position.z
+                    );
+                    mesh.quaternion.set(
+                        body.quaternion.x,
+                        body.quaternion.y,
+                        body.quaternion.z,
+                        body.quaternion.w
+                    );
+                }
+                
+                mesh.updateMatrix();
+            }
+            
+            toggle(enabled) {
+                this._enabled = enabled;
+                console.log("コリジョン表示:", enabled ? "オン" : "オフ");
+                
+                // 状態表示を画面に表示
+                const statusElement = document.getElementById('debug-status');
+                if (statusElement) {
+                    statusElement.textContent = `コリジョン表示: ${enabled ? "オン" : "オフ"}`;
+                    statusElement.style.display = enabled ? 'block' : 'none';
+                } else if (enabled) {
+                    // ステータス表示エレメントを作成
+                    const newStatusElement = document.createElement('div');
+                    newStatusElement.id = 'debug-status';
+                    newStatusElement.style.position = 'absolute';
+                    newStatusElement.style.top = '60px';
+                    newStatusElement.style.left = '10px';
+                    newStatusElement.style.color = 'white';
+                    newStatusElement.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                    newStatusElement.style.padding = '5px';
+                    newStatusElement.style.borderRadius = '3px';
+                    newStatusElement.style.fontFamily = 'sans-serif';
+                    newStatusElement.style.zIndex = '100';
+                    newStatusElement.textContent = `コリジョン表示: ${enabled ? "オン" : "オフ"}`;
+                    document.body.appendChild(newStatusElement);
+                }
+                
+                // デバッグ情報を更新
+                updateDebugInfo();
+                
+                // 即座に更新
+                if (!enabled) {
+                    this._removeAllVisuals();
+                }
+            }
+        }
+        
+        init();
+    </script>
+</body>
+</html>

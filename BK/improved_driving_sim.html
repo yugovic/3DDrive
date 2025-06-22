@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Driving Simulation - Improved Physics</title>
+    <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #ff8c42;
+          overflow: hidden;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          color: white;
+        }
+        
+        .info-overlay {
+          position: absolute;
+          bottom: 20px;
+          text-align: center;
+          font-weight: bold;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          z-index: 10;
+        }
+        
+        .key-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 10px;
+        }
+        
+        .key {
+          background-color: white;
+          color: #333;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          margin: 0 5px;
+          border-radius: 4px;
+          font-weight: bold;
+        }
+        
+        .loading-status {
+          position: fixed;
+          bottom: 20px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 10px 15px;
+          border-radius: 4px;
+          font-size: 14px;
+          z-index: 100;
+        }
+
+        .speed-indicator {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-overlay">
+        <div>Use arrow keys to drive - Hold SPACE to brake</div>
+        <div class="key-controls">
+            <div class="key">↑</div>
+            <div class="key">←</div>
+            <div class="key">↓</div>
+            <div class="key">→</div>
+            <div class="key">SPACE</div>
+        </div>
+    </div>
+    
+    <div class="loading-status" id="loading-status">ロード中...</div>
+    <div class="speed-indicator" id="speed-indicator">速度: 0 km/h</div>
+    
+    <script type="module">
+        // Three.js implementation for 3D driving simulation with improved physics
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.126.0/build/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/DRACOLoader.js';
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xff8c42);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        
+        // Set camera position for angled top-down view
+        camera.position.set(15, 20, 15);
+        camera.lookAt(0, 0, 0);
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(20, 30, 20);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+        directionalLight.shadow.camera.left = -50;
+        directionalLight.shadow.camera.right = 50;
+        directionalLight.shadow.camera.top = 50;
+        directionalLight.shadow.camera.bottom = -50;
+        scene.add(directionalLight);
+        
+        // Create expanded ground
+        const groundGeometry = new THREE.PlaneGeometry(500, 500); // Significantly expanded field
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xff8c42,
+            roughness: 0.8
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Create trees (yellow blocks)
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+            
+            // Trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1.5, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0xc8a37a });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.y = 0.75;
+            trunk.castShadow = true;
+            tree.add(trunk);
+            
+            // Foliage
+            const foliageGeometry = new THREE.BoxGeometry(2, 3, 2);
+            const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0xecef7a });
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+            foliage.position.y = 3;
+            foliage.castShadow = true;
+            tree.add(foliage);
+            
+            tree.position.set(x, 0, z);
+            return tree;
+        }
+        
+        // Create smooth ramps and hills (car can drive over)
+        function createRamp(x, z, width, height, depth) {
+            const geometry = new THREE.CylinderGeometry(width/2, width/2, height, 16);
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const ramp = new THREE.Mesh(geometry, material);
+            ramp.position.set(x, height/2, z);
+            ramp.scale.set(1, 0.3, depth/width); // Make it ramp-like
+            ramp.castShadow = true;
+            ramp.receiveShadow = true;
+            return ramp;
+        }
+        
+        // Create smooth hills
+        function createHill(x, z, radius, height) {
+            const geometry = new THREE.SphereGeometry(radius, 16, 8, 0, Math.PI * 2, 0, Math.PI/2);
+            const material = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+            const hill = new THREE.Mesh(geometry, material);
+            hill.position.set(x, 0, z);
+            hill.scale.y = height / radius;
+            hill.castShadow = true;
+            hill.receiveShadow = true;
+            return hill;
+        }
+        
+        // Add trees across expanded field
+        const trees = [
+            // Original cluster
+            createTree(-6, 5), createTree(-4, 2), createTree(6, 3), createTree(8, -2), createTree(2, -8),
+            createTree(-12, -5), createTree(10, 8), createTree(-8, 12),
+            // Extended field trees
+            createTree(-25, 15), createTree(-30, -10), createTree(25, 20), createTree(30, -15),
+            createTree(-40, 25), createTree(40, -25), createTree(-35, -30), createTree(35, 30),
+            createTree(-50, 0), createTree(50, 5), createTree(0, -50), createTree(5, 50),
+            createTree(-20, 40), createTree(20, -40), createTree(-45, -20), createTree(45, 25),
+            // Forest clusters
+            createTree(-60, -40), createTree(-58, -42), createTree(-62, -38), createTree(-60, -36),
+            createTree(60, 40), createTree(58, 42), createTree(62, 38), createTree(60, 36),
+            // Scattered individual trees
+            createTree(-75, 10), createTree(75, -10), createTree(-15, 75), createTree(15, -75),
+            createTree(-80, -60), createTree(80, 60), createTree(-55, 70), createTree(55, -70)
+        ];
+        trees.forEach(tree => scene.add(tree));
+        
+        // Add smooth ramps and hills (driveable obstacles)
+        const obstacles = [
+            // Smooth ramps
+            createRamp(-20, -20, 8, 1, 12),
+            createRamp(20, 20, 10, 1.5, 15),
+            createRamp(-30, 10, 6, 1, 10),
+            createRamp(30, -10, 8, 1.2, 12),
+            
+            // Hills
+            createHill(-40, -40, 8, 3),
+            createHill(40, 40, 10, 4),
+            createHill(-50, 30, 6, 2.5),
+            createHill(50, -30, 7, 3),
+            createHill(0, 60, 12, 5),
+            createHill(0, -60, 12, 5),
+            
+            // Small rolling hills
+            createHill(-15, 0, 4, 1.5),
+            createHill(15, 0, 4, 1.5),
+            createHill(0, 25, 5, 2),
+            createHill(0, -25, 5, 2),
+            
+            // Distant large hills
+            createHill(-80, -80, 15, 6),
+            createHill(80, 80, 15, 6),
+            createHill(-80, 80, 12, 5),
+            createHill(80, -80, 12, 5)
+        ];
+        obstacles.forEach(obstacle => scene.add(obstacle));
+        
+        // Car physics variables
+        let car;
+        const carPhysics = {
+            velocity: new THREE.Vector3(0, 0, 0),
+            acceleration: new THREE.Vector3(0, 0, 0),
+            rotation: 0,
+            angularVelocity: 0,
+            mass: 1000, // kg
+            enginePower: 8000, // Watts
+            maxSpeed: 2.0, // Further increased for 150km/h capability
+            friction: 0.92, // Ground friction coefficient
+            airResistance: 0.98, // Air resistance coefficient
+            brakeForce: 0.85, // Brake friction coefficient
+            turnRadius: 0.05, // How sharp the car can turn
+            wheelbase: 2.5 // Distance between front and rear axles
+        };
+        
+        // Collision detection setup
+        const carCollisionBox = new THREE.Box3();
+        const obstacleBoxes = [];
+        
+        const loadingStatus = document.getElementById('loading-status');
+        const speedIndicator = document.getElementById('speed-indicator');
+        
+        // Set up DRACO loader
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+        dracoLoader.setDecoderConfig({ type: 'js' });
+        
+        // Set up GLTF loader with DRACO support
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+        
+        // Load car model
+        loader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/ferrari.glb', 
+            function(gltf) {
+                car = gltf.scene;
+                car.scale.set(0.6, 0.6, 0.6);
+                car.castShadow = true;
+                
+                // Traverse and enable shadows for all meshes
+                car.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                scene.add(car);
+                
+                // Initialize collision boxes for obstacles
+                obstacles.forEach(obstacle => {
+                    const box = new THREE.Box3().setFromObject(obstacle);
+                    obstacleBoxes.push(box);
+                });
+                
+                loadingStatus.textContent = "ロード完了！";
+                loadingStatus.style.backgroundColor = "rgba(0, 128, 0, 0.7)";
+                
+                setTimeout(() => {
+                    loadingStatus.style.opacity = "0";
+                    loadingStatus.style.transition = "opacity 1s";
+                }, 3000);
+            },
+            function(xhr) {
+                if (xhr.total === 0) {
+                    loadingStatus.textContent = `ロード中...`;
+                } else {
+                    const percentComplete = xhr.loaded / xhr.total * 100;
+                    loadingStatus.textContent = `ロード中...${Math.round(percentComplete)}%`;
+                }
+            },
+            function(error) {
+                console.error(error);
+                loadingStatus.textContent = "ロード失敗！";
+                loadingStatus.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
+            }
+        );
+        
+        const keyState = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keyState[e.key] = true;
+            keyState[e.code] = true;
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keyState[e.key] = false;
+            keyState[e.code] = false;
+        });
+        
+        // Improved physics-based car movement
+        function updateCarPhysics() {
+            if (!car) return;
+            
+            // Reset acceleration
+            carPhysics.acceleration.set(0, 0, 0);
+            
+            // Calculate current speed for display (targeting 150km/h max)
+            const speed = carPhysics.velocity.length();
+            const speedKmh = Math.round(speed * 75); // Adjusted for 150km/h at max speed
+            speedIndicator.textContent = `速度: ${speedKmh} km/h`;
+            
+            // Engine force (forward/backward)
+            let engineForce = 0;
+            if (keyState['ArrowUp']) {
+                engineForce = carPhysics.enginePower / carPhysics.mass * 0.003; // Increased for higher speed
+            } else if (keyState['ArrowDown']) {
+                engineForce = -carPhysics.enginePower / carPhysics.mass * 0.0015; // Reverse is slower
+            }
+            
+            // Apply engine force in car's forward direction (corrected orientation)
+            const forwardDirection = new THREE.Vector3(
+                -Math.sin(car.rotation.y), // Corrected direction
+                0,
+                -Math.cos(car.rotation.y)  // Corrected direction
+            );
+            
+            const engineAcceleration = forwardDirection.clone().multiplyScalar(engineForce);
+            carPhysics.acceleration.add(engineAcceleration);
+            
+            // Steering (only effective when moving)
+            let steeringInput = 0;
+            if (keyState['ArrowLeft']) {
+                steeringInput = 1;
+            } else if (keyState['ArrowRight']) {
+                steeringInput = -1;
+            }
+            
+            // Calculate turning based on speed and steering input
+            if (Math.abs(speed) > 0.01) {
+                const turnRate = steeringInput * carPhysics.turnRadius * Math.min(speed / 0.2, 1);
+                carPhysics.angularVelocity = turnRate;
+                car.rotation.y += carPhysics.angularVelocity;
+            } else {
+                carPhysics.angularVelocity *= 0.8; // Dampen angular velocity when stopped
+            }
+            
+            // Braking
+            if (keyState[' '] || keyState['Space']) {
+                carPhysics.velocity.multiplyScalar(carPhysics.brakeForce);
+            }
+            
+            // Apply friction and air resistance
+            carPhysics.velocity.multiplyScalar(carPhysics.friction * carPhysics.airResistance);
+            
+            // Update velocity with acceleration
+            carPhysics.velocity.add(carPhysics.acceleration);
+            
+            // Limit maximum speed
+            if (carPhysics.velocity.length() > carPhysics.maxSpeed) {
+                carPhysics.velocity.normalize().multiplyScalar(carPhysics.maxSpeed);
+            }
+            
+            // Store previous position for collision detection
+            const prevPosition = car.position.clone();
+            
+            // Update position
+            car.position.add(carPhysics.velocity);
+            
+            // Boundary collision detection (expanded boundaries)
+            const mapBoundary = 200; // Expanded from 20 to 200
+            let collisionOccurred = false;
+            
+            if (Math.abs(car.position.x) > mapBoundary || Math.abs(car.position.z) > mapBoundary) {
+                collisionOccurred = true;
+            }
+            
+            // Obstacle collision detection (reduced for smooth obstacles)
+            if (!collisionOccurred) {
+                carCollisionBox.setFromObject(car);
+                
+                for (let i = 0; i < obstacleBoxes.length; i++) {
+                    const box = obstacleBoxes[i];
+                    if (carCollisionBox.intersectsBox(box)) {
+                        // For smooth obstacles, allow driving over them instead of hard collision
+                        const obstacle = obstacles[i];
+                        if (obstacle && obstacle.position) {
+                            // Calculate height at car position for smooth obstacles
+                            const distanceToObstacle = car.position.distanceTo(obstacle.position);
+                            const obstacleRadius = obstacle.geometry.parameters.radiusTop || obstacle.geometry.parameters.radius || 5;
+                            
+                            if (distanceToObstacle < obstacleRadius) {
+                                // Elevate car based on obstacle height
+                                const heightRatio = 1 - (distanceToObstacle / obstacleRadius);
+                                const maxHeight = obstacle.scale.y * (obstacle.geometry.parameters.height || 2);
+                                car.position.y = Math.max(car.position.y, heightRatio * maxHeight * 0.5);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            // Handle boundary collision only
+            if (collisionOccurred) {
+                // Restore previous position
+                car.position.copy(prevPosition);
+                
+                // Reduce velocity significantly (bounce effect)
+                carPhysics.velocity.multiplyScalar(-0.3);
+                
+                // Add some angular momentum for realistic collision
+                carPhysics.angularVelocity += (Math.random() - 0.5) * 0.1;
+            }
+            
+            // Smooth ground return (gravity effect)
+            if (car.position.y > 0) {
+                car.position.y = Math.max(0, car.position.y - 0.1); // Gradual descent
+            }
+            
+            // Add slight car tilt based on turning and speed
+            if (Math.abs(carPhysics.angularVelocity) > 0.01) {
+                const tiltAmount = carPhysics.angularVelocity * speed * 0.3;
+                car.rotation.z = THREE.MathUtils.lerp(car.rotation.z, tiltAmount, 0.1);
+            } else {
+                car.rotation.z = THREE.MathUtils.lerp(car.rotation.z, 0, 0.05);
+            }
+        }
+        
+        // Fixed camera system - follows car but maintains consistent viewing angle
+        function updateCamera() {
+            if (!car) return;
+            
+            // Fixed camera offset and height
+            const cameraOffset = new THREE.Vector3(15, 20, 15);
+            
+            // Camera follows car position but maintains fixed relative position
+            const targetCameraPosition = car.position.clone().add(cameraOffset);
+            
+            // Smooth camera following
+            camera.position.lerp(targetCameraPosition, 0.08);
+            
+            // Always look at the car from the same angle
+            camera.lookAt(car.position);
+        }
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updateCarPhysics();
+            updateCamera();
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

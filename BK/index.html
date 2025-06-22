@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Driving Simulation</title>
+    <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #ff8c42;
+          overflow: hidden;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          color: white;
+        }
+        
+        .info-overlay {
+          position: absolute;
+          bottom: 20px;
+          text-align: center;
+          font-weight: bold;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          z-index: 10;
+        }
+        
+        .key-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 10px;
+        }
+        
+        .key {
+          background-color: white;
+          color: #333;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          margin: 0 5px;
+          border-radius: 4px;
+          font-weight: bold;
+        }
+        
+        .loading-status {
+          position: fixed;
+          bottom: 20px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 10px 15px;
+          border-radius: 4px;
+          font-size: 14px;
+          z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-overlay">
+        <div>Use arrow keys to move around</div>
+        <div class="key-controls">
+            <div class="key">↑</div>
+            <div class="key">←</div>
+            <div class="key">↓</div>
+            <div class="key">→</div>
+        </div>
+    </div>
+    
+    <div class="loading-status" id="loading-status">ロード中...</div>
+    
+    <script type="module">
+        // Three.js implementation for 3D driving simulation
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.126.0/build/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/DRACOLoader.js';
+        import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
+        
+        // デバッグ用
+        const DEBUG = true;
+        function log(...args) {
+            if (DEBUG) console.log(...args);
+        }
+        
+        log("Starting 3D driving simulation...");
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xff8c42); // Orange background
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        
+        // Set camera position for angled top-down view
+        camera.position.set(15, 20, 15);
+        camera.lookAt(0, 0, 0);
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 1024;
+        directionalLight.shadow.mapSize.height = 1024;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 50;
+        scene.add(directionalLight);
+        
+        // Create ground
+        const groundGeometry = new THREE.PlaneGeometry(50, 50);
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xff8c42,
+            roughness: 0.8
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Physics world setup
+        const world = new CANNON.World({
+            gravity: new CANNON.Vec3(0, -9.82, 0)
+        });
+        
+        // Ground physics body
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({
+            mass: 0, // static body
+            type: CANNON.Body.STATIC,
+            shape: groundShape
+        });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Rotate to match the visual ground
+        world.addBody(groundBody);
+        
+        // Create trees (yellow blocks)
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+            
+            // Trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1.5, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0xc8a37a });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.y = 0.75;
+            trunk.castShadow = true;
+            tree.add(trunk);
+            
+            // Foliage
+            const foliageGeometry = new THREE.BoxGeometry(2, 3, 2);
+            const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0xecef7a });
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+            foliage.position.y = 3;
+            foliage.castShadow = true;
+            tree.add(foliage);
+            
+            tree.position.set(x, 0, z);
+            
+            // Add physics body for the tree
+            const treeShape = new CANNON.Box(new CANNON.Vec3(1, 1.5, 1)); // Simplified collision box
+            const treeBody = new CANNON.Body({
+                mass: 0, // static body
+                type: CANNON.Body.STATIC,
+                shape: treeShape,
+                position: new CANNON.Vec3(x, 1.5, z)
+            });
+            world.addBody(treeBody);
+            
+            // Store the physics body reference
+            tree.userData.physicsBody = treeBody;
+            
+            return tree;
+        }
+        
+        // Create obstacles (white blocks)
+        function createObstacle(x, z, width, height, depth) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff });
+            const obstacle = new THREE.Mesh(geometry, material);
+            obstacle.position.set(x, height/2, z);
+            obstacle.castShadow = true;
+            
+            // Add physics body for the obstacle
+            const obstacleShape = new CANNON.Box(new CANNON.Vec3(width/2, height/2, depth/2));
+            const obstacleBody = new CANNON.Body({
+                mass: 0, // static body
+                type: CANNON.Body.STATIC,
+                shape: obstacleShape,
+                position: new CANNON.Vec3(x, height/2, z)
+            });
+            world.addBody(obstacleBody);
+            
+            // Store the physics body reference
+            obstacle.userData.physicsBody = obstacleBody;
+            
+            return obstacle;
+        }
+        
+        // Add trees
+        const trees = [
+            createTree(-6, 5),
+            createTree(-4, 2),
+            createTree(6, 3),
+            createTree(8, -2),
+            createTree(2, -8)
+        ];
+        trees.forEach(tree => scene.add(tree));
+        
+        // Add obstacles (white walls)
+        const obstacles = [
+            createObstacle(-10, -10, 8, 1, 1),  // Left bottom wall
+            createObstacle(-14, -6, 1, 1, 8),   // Left wall
+            createObstacle(-10, 8, 8, 1, 1),    // Left top wall
+            createObstacle(10, 10, 8, 1, 1),    // Right top wall
+            createObstacle(14, 6, 1, 1, 8),     // Right wall
+            createObstacle(10, -10, 8, 1, 1),   // Right bottom wall
+            createObstacle(-2, 2, 1, 1, 1),     // Small obstacle
+            createObstacle(2, 4, 1, 1, 1),      // Small obstacle
+            createObstacle(-4, -2, 1, 1, 1)     // Small obstacle
+        ];
+        obstacles.forEach(obstacle => scene.add(obstacle));
+        
+        // Create vehicle
+        let vehicle;
+        let vehicleBody;
+        let carMesh;
+        
+        // Setup RigidVehicle
+        function setupVehicle() {
+            log("Setting up vehicle...");
+            
+            // Create the vehicle chassis
+            const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+            vehicleBody = new CANNON.Body({
+                mass: 150,
+                position: new CANNON.Vec3(0, 1, 0),
+                shape: chassisShape
+            });
+            
+            world.addBody(vehicleBody);
+            log("Added chassis body to world");
+            
+            // Create the vehicle
+            vehicle = new CANNON.RigidVehicle({
+                chassisBody: vehicleBody
+            });
+            
+            // Front left wheel
+            const wheelShape1 = new CANNON.Sphere(0.5);
+            const wheelBody1 = new CANNON.Body({
+                mass: 1,
+                material: new CANNON.Material("wheel")
+            });
+            wheelBody1.addShape(wheelShape1);
+            wheelBody1.position.set(-1, 0.5, -1.5);
+            world.addBody(wheelBody1);
+            
+            // Front right wheel
+            const wheelShape2 = new CANNON.Sphere(0.5);
+            const wheelBody2 = new CANNON.Body({
+                mass: 1,
+                material: new CANNON.Material("wheel")
+            });
+            wheelBody2.addShape(wheelShape2);
+            wheelBody2.position.set(1, 0.5, -1.5);
+            world.addBody(wheelBody2);
+            
+            // Rear left wheel
+            const wheelShape3 = new CANNON.Sphere(0.5);
+            const wheelBody3 = new CANNON.Body({
+                mass: 1,
+                material: new CANNON.Material("wheel")
+            });
+            wheelBody3.addShape(wheelShape3);
+            wheelBody3.position.set(-1, 0.5, 1.5);
+            world.addBody(wheelBody3);
+            
+            // Rear right wheel
+            const wheelShape4 = new CANNON.Sphere(0.5);
+            const wheelBody4 = new CANNON.Body({
+                mass: 1,
+                material: new CANNON.Material("wheel")
+            });
+            wheelBody4.addShape(wheelShape4);
+            wheelBody4.position.set(1, 0.5, 1.5);
+            world.addBody(wheelBody4);
+            
+            // Add wheels to vehicle
+            vehicle.addWheel({
+                body: wheelBody1,
+                position: new CANNON.Vec3(-1, -0.5, -1.5), // Position relative to chassis
+                axis: new CANNON.Vec3(0, 0, 1), // Axis of rotation
+                direction: new CANNON.Vec3(0, -1, 0) // Direction of suspension
+            });
+            
+            vehicle.addWheel({
+                body: wheelBody2,
+                position: new CANNON.Vec3(1, -0.5, -1.5),
+                axis: new CANNON.Vec3(0, 0, 1),
+                direction: new CANNON.Vec3(0, -1, 0)
+            });
+            
+            vehicle.addWheel({
+                body: wheelBody3,
+                position: new CANNON.Vec3(-1, -0.5, 1.5),
+                axis: new CANNON.Vec3(0, 0, 1),
+                direction: new CANNON.Vec3(0, -1, 0)
+            });
+            
+            vehicle.addWheel({
+                body: wheelBody4,
+                position: new CANNON.Vec3(1, -0.5, 1.5),
+                axis: new CANNON.Vec3(0, 0, 1),
+                direction: new CANNON.Vec3(0, -1, 0)
+            });
+            
+            // Set suspension
+            vehicle.wheelBodies.forEach((wheelBody, i) => {
+                // Wheel body properties
+                wheelBody.angularDamping = 0.4;
+                
+                // Set wheel suspension properties
+                vehicle.constraints[i].setSpringParameters(
+                    30000, // Spring stiffness
+                    1000,  // Spring damping
+                    0.3    // Spring rest length
+                );
+                
+                vehicle.constraints[i].disableRotationalLock();
+            });
+            
+            // Add the vehicle to the world
+            vehicle.addToWorld(world);
+            log("Vehicle added to world");
+        }
+        
+        // Set up the vehicle
+        setupVehicle();
+        
+        // Create car using GLTF model
+        const loadingStatus = document.getElementById('loading-status');
+        
+        // Set up DRACO loader
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+        dracoLoader.setDecoderConfig({ type: 'js' });
+        
+        // Set up GLTF loader with DRACO support
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+        
+        // タイムアウト処理の追加
+        let loadTimeout = setTimeout(() => {
+            log("Model loading timeout! Creating fallback model...");
+            loadingStatus.textContent = "モデルロードタイムアウト - 簡易モデルを使用します";
+            loadingStatus.style.backgroundColor = "rgba(255, 165, 0, 0.7)"; // オレンジ色
+            createFallbackCarModel();
+        }, 10000); // 10秒のタイムアウト
+        
+        // フォールバックの車モデルを作成する関数
+        function createFallbackCarModel() {
+            log("Creating fallback car model");
+            
+            // 簡易的な車のモデルを作成
+            carMesh = new THREE.Group();
+            
+            // 車体（ボディ）
+            const bodyGeometry = new THREE.BoxGeometry(2, 1, 4);
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // 赤色
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = 0.5;
+            body.castShadow = true;
+            carMesh.add(body);
+            
+            // 屋根部分
+            const roofGeometry = new THREE.BoxGeometry(1.8, 0.7, 2);
+            const roofMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            const roof = new THREE.Mesh(roofGeometry, roofMaterial);
+            roof.position.y = 1.35;
+            roof.position.z = -0.5;
+            roof.castShadow = true;
+            carMesh.add(roof);
+            
+            // ホイール
+            const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+            const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            
+            // 前輪
+            const frontLeftWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            frontLeftWheel.rotation.z = Math.PI / 2;
+            frontLeftWheel.position.set(-1, 0.5, -1.5);
+            frontLeftWheel.castShadow = true;
+            carMesh.add(frontLeftWheel);
+            
+            const frontRightWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            frontRightWheel.rotation.z = Math.PI / 2;
+            frontRightWheel.position.set(1, 0.5, -1.5);
+            frontRightWheel.castShadow = true;
+            carMesh.add(frontRightWheel);
+            
+            // 後輪
+            const backLeftWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            backLeftWheel.rotation.z = Math.PI / 2;
+            backLeftWheel.position.set(-1, 0.5, 1.5);
+            backLeftWheel.castShadow = true;
+            carMesh.add(backLeftWheel);
+            
+            const backRightWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            backRightWheel.rotation.z = Math.PI / 2;
+            backRightWheel.position.set(1, 0.5, 1.5);
+            backRightWheel.castShadow = true;
+            carMesh.add(backRightWheel);
+            
+            // ライト
+            const lightGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.1);
+            const lightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffcc });
+            
+            const leftLight = new THREE.Mesh(lightGeometry, lightMaterial);
+            leftLight.position.set(-0.7, 0.5, -2);
+            carMesh.add(leftLight);
+            
+            const rightLight = new THREE.Mesh(lightGeometry, lightMaterial);
+            rightLight.position.set(0.7, 0.5, -2);
+            carMesh.add(rightLight);
+            
+            // 影
+            const shadowGeometry = new THREE.CircleGeometry(3, 32);
+            const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5 });
+            const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+            shadow.rotation.x = -Math.PI / 2;
+            shadow.position.y = 0.01;  // Just above ground level
+            carMesh.add(shadow);
+            
+            scene.add(carMesh);
+            
+            // ロード完了表示
+            loadingStatus.textContent = "簡易モデルを使用します";
+            loadingStatus.style.backgroundColor = "rgba(0, 128, 0, 0.7)";
+            
+            // 3秒後にロード表示を非表示
+            setTimeout(() => {
+                loadingStatus.style.opacity = "0";
+                loadingStatus.style.transition = "opacity 1s";
+            }, 3000);
+        }
+        
+        // Use the Ferrari model from Three.js examples
+        loader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/ferrari.glb', 
+            // onLoad callback
+            function(gltf) {
+                // タイムアウトをクリア
+                clearTimeout(loadTimeout);
+                
+                log("Ferrari model loaded successfully");
+                carMesh = gltf.scene;
+                carMesh.scale.set(0.8, 0.8, 0.8);
+                
+                // Add car shadow
+                const shadowGeometry = new THREE.CircleGeometry(3, 32);
+                const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5 });
+                const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+                shadow.rotation.x = -Math.PI / 2;
+                shadow.position.y = 0.01;  // Just above ground level
+                carMesh.add(shadow);
+                
+                scene.add(carMesh);
+                
+                // Update loading status
+                loadingStatus.textContent = "ロード完了！";
+                loadingStatus.style.backgroundColor = "rgba(0, 128, 0, 0.7)";
+                
+                // Hide loading status after 3 seconds
+                setTimeout(() => {
+                    loadingStatus.style.opacity = "0";
+                    loadingStatus.style.transition = "opacity 1s";
+                }, 3000);
+            },
+            // onProgress callback
+            function(xhr) {
+                if (xhr.total === 0) {
+                    loadingStatus.textContent = `ロード中...`;
+                } else {
+                    const percentComplete = xhr.loaded / xhr.total * 100;
+                    loadingStatus.textContent = `ロード中...${Math.round(percentComplete)}%`;
+                }
+            },
+            // onError callback
+            function(error) {
+                // タイムアウトをクリア
+                clearTimeout(loadTimeout);
+                
+                console.error("Error loading Ferrari model:", error);
+                loadingStatus.textContent = "モデルロード失敗！簡易モデルを使用します";
+                loadingStatus.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
+                
+                // フォールバックモデルを作成
+                createFallbackCarModel();
+            }
+        );
+        
+        // Vehicle controls
+        const maxSteerVal = 0.5;
+        const maxForce = 800;  // 増加
+        const brakeForce = 80; // 増加
+        
+        const keyState = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keyState[e.key] = true;
+            log(`Key down: ${e.key}`);
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keyState[e.key] = false;
+            log(`Key up: ${e.key}`);
+        });
+        
+        function updateVehicle() {
+            if (!vehicle) {
+                log("Vehicle not ready yet");
+                return;
+            }
+            
+            // Reset steering and forces
+            vehicle.setSteeringValue(0, 0);
+            vehicle.setSteeringValue(0, 1);
+            
+            vehicle.applyWheelForce(0, 2);
+            vehicle.applyWheelForce(0, 3);
+            
+            // Forward
+            if (keyState['ArrowUp']) {
+                log("Applying forward force", maxForce);
+                vehicle.applyWheelForce(maxForce, 2);
+                vehicle.applyWheelForce(maxForce, 3);
+            }
+            
+            // Backward / brake
+            if (keyState['ArrowDown']) {
+                // If we're moving forward, apply brakes
+                if (vehicleBody.velocity.z < -0.1) {
+                    log("Applying brake force", brakeForce);
+                    vehicle.applyWheelForce(-brakeForce, 2);
+                    vehicle.applyWheelForce(-brakeForce, 3);
+                } else {
+                    // Otherwise reverse
+                    log("Applying reverse force", -maxForce / 2);
+                    vehicle.applyWheelForce(-maxForce / 2, 2);
+                    vehicle.applyWheelForce(-maxForce / 2, 3);
+                }
+            }
+            
+            // Left
+            if (keyState['ArrowLeft']) {
+                log("Steering left", maxSteerVal);
+                vehicle.setSteeringValue(maxSteerVal, 0);
+                vehicle.setSteeringValue(maxSteerVal, 1);
+            }
+            
+            // Right
+            if (keyState['ArrowRight']) {
+                log("Steering right", -maxSteerVal);
+                vehicle.setSteeringValue(-maxSteerVal, 0);
+                vehicle.setSteeringValue(-maxSteerVal, 1);
+            }
+            
+            // デバッグ情報
+            if (vehicleBody) {
+                log("Vehicle position:", vehicleBody.position);
+                log("Vehicle velocity:", vehicleBody.velocity);
+            }
+            
+            // Update car mesh position and rotation to match physics body
+            if (carMesh && vehicleBody) {
+                carMesh.position.x = vehicleBody.position.x;
+                carMesh.position.y = vehicleBody.position.y - 0.5; // 少し下げる
+                carMesh.position.z = vehicleBody.position.z;
+                
+                carMesh.quaternion.x = vehicleBody.quaternion.x;
+                carMesh.quaternion.y = vehicleBody.quaternion.y;
+                carMesh.quaternion.z = vehicleBody.quaternion.z;
+                carMesh.quaternion.w = vehicleBody.quaternion.w;
+            }
+        }
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Fixed time step for physics
+        const fixedTimeStep = 1.0 / 60.0; // 60 Hz
+        const maxSubSteps = 3;
+        let lastCallTime = 0;
+        
+        // Animation loop
+        function animate(time) {
+            requestAnimationFrame(animate);
+            
+            // Compute delta time
+            if (lastCallTime === 0) {
+                lastCallTime = time;
+            }
+            const dt = (time - lastCallTime) / 1000;
+            lastCallTime = time;
+            
+            // デバッグ情報
+            if (DEBUG && vehicle && vehicleBody) {
+                const speedKmh = Math.sqrt(
+                    vehicleBody.velocity.x * vehicleBody.velocity.x + 
+                    vehicleBody.velocity.z * vehicleBody.velocity.z
+                ) * 3.6; // m/s から km/h へ変換
+                
+                console.log(`Speed: ${speedKmh.toFixed(1)} km/h`);
+            }
+            
+            // Update physics - 物理演算の頻度を上げる
+            world.step(1/120);
+            
+            // Update vehicle controls
+            updateVehicle();
+            
+            // Update camera to follow car
+            if (carMesh) {
+                // より滑らかなカメラ追従
+                const cameraTargetX = carMesh.position.x + 15;
+                const cameraTargetZ = carMesh.position.z + 15;
+                
+                camera.position.x = THREE.MathUtils.lerp(camera.position.x, cameraTargetX, 0.05);
+                camera.position.z = THREE.MathUtils.lerp(camera.position.z, cameraTargetZ, 0.05);
+                camera.lookAt(carMesh.position);
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>

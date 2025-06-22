@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js & Cannon.js RaycastVehicle (GLB Model)</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: sans-serif;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            font-family: sans-serif;
+            background-color: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            display: none; /* 初期状態は非表示 */
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        操作方法:<br>
+        W / ↑: アクセル<br>
+        S / ↓: ブレーキ / バック<br>
+        A / ←: 左ステアリング<br>
+        D / →: 右ステアリング<br>
+        R: リセット
+    </div>
+    <div id="loading">読み込み中...</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let world, vehicle, chassisBody, groundBody;
+        let carMesh = null; // 初期状態はnull
+        let groundMesh;
+        // const wheelMeshes = []; // GLBモデルのホイールを使うため、Cannonのホイールメッシュは作成しない
+
+        // RX-7 (FD3S)のおおよその寸法を参考に物理形状を設定
+        const chassisDepth = 4.29; // 全長 (X軸)
+        const chassisWidth = 1.76; // 全幅 (Z軸)
+        const chassisHeight = 1.23; // 全高 (Y軸)
+        const massVehicle = 250; // モデルに合わせて質量調整
+
+        const wheelAxisPosition = chassisWidth * 0.4; // ホイールのトレッド幅の半分程度
+        const wheelRadius = 0.33; // タイヤ半径 (17インチホイールのタイヤ外径660mm程度 / 2)
+        const wheelThickness = 0.25; // タイヤ幅
+        const wheelSegments = 16;
+
+        const keysActions = {
+            "KeyW": "acceleration", "ArrowUp": "acceleration",
+            "KeyS": "braking", "ArrowDown": "braking",
+            "KeyA": "left", "ArrowLeft": "left",
+            "KeyD": "right", "ArrowRight": "right"
+        };
+        const vehicleSteeringState = { 
+            acceleration: false, braking: false, left: false, right: false
+        };
+
+        let baseMaxSteerVal = 0.55;    
+        let engineBaseForce = 1000;    
+        let brakeForce = 30;
+        
+        const steerHighSpeedThreshold = 9;  
+        const steerMinFactorAtHighSpeed = 0.15; 
+        const steerReductionSpeedRange = 18; 
+
+        const forceHighSpeedThreshold = 7; 
+        const forceMinFactorAtHighSpeed = 0.1; 
+        const forceReductionSpeedRange = 22;  
+
+        const initialPosition = new CANNON.Vec3(0, 0.8, 0); // 地面すれすれからスタート (モデル原点による)
+        const initialQuaternion = new CANNON.Quaternion();
+        initialQuaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), Math.PI); // 初期状態でZ軸負方向を向くように180度回転 (GLBモデルの向きによる)
+
+        const loadingManager = new THREE.LoadingManager();
+        const gltfLoader = new THREE.GLTFLoader(loadingManager);
+        const modelUrl = 'https://raw.githubusercontent.com/yugovic/test/main/rx7Sava_v3.glb';
+        const loadingElement = document.getElementById('loading');
+
+        loadingManager.onStart = function ( url, itemsLoaded, itemsTotal ) {
+            loadingElement.style.display = 'block';
+        };
+        loadingManager.onLoad = function ( ) {
+            loadingElement.style.display = 'none';
+            console.log( '全ての読み込みが完了しました!' );
+            // モデル読み込み後にアニメーションループを開始する場合など
+        };
+        loadingManager.onError = function ( url ) {
+            loadingElement.textContent = '読み込みエラー: ' + url;
+            console.error( '読み込みエラーが発生しました: ' + url );
+        };
+
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xabcdef); // 明るい背景色
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(5, 4, 6); 
+            camera.lookAt(0, 0.5, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; // ソフトシャドウ
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(20, 30, 15);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048; 
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 80; // 影響範囲を広げる
+            directionalLight.shadow.camera.left = -30;
+            directionalLight.shadow.camera.right = 30;
+            directionalLight.shadow.camera.top = 30;
+            directionalLight.shadow.camera.bottom = -30;
+            scene.add(directionalLight);
+            // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
+            // scene.add(shadowHelper);
+
+
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            world.solver.iterations = 15; 
+            world.defaultContactMaterial.friction = 0.2; 
+
+            createGround();
+            // createVehicleはモデル読み込み後に行うか、モデル読み込みをcreateVehicle内で行う
+            loadCarModelAndCreateVehicle();
+
+
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+
+            animate(); // アニメーションループは先に開始し、carMeshがnullの間は処理をスキップ
+        }
+        
+        function loadCarModelAndCreateVehicle() {
+            gltfLoader.load(modelUrl, (gltf) => {
+                carMesh = gltf.scene;
+                // モデルのスケール、位置、向きを調整
+                // この値はモデルによって試行錯誤が必要
+                const desiredHeight = chassisHeight * 0.8; // 見た目の高さを物理形状に合わせる
+                const box = new THREE.Box3().setFromObject(carMesh);
+                const size = box.getSize(new THREE.Vector3());
+                const scaleFactor = desiredHeight / size.y;
+                carMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+                // モデルの原点が中心になるようにオフセット調整 (必要に応じて)
+                // box.getCenter(carMesh.position).multiplyScalar(-1); // 原点を中心に移動
+                // ただし、物理ボディの原点と合わせるため、モデルの底面がY=0付近に来るように調整が必要な場合もある
+                // 今回はY軸オフセットはCannon.js側のchassisShapeOffsetで調整する方が良いかもしれない
+                
+                // キャストシャドウとレシーブシャドウをモデルの全ての子メッシュに設定
+                carMesh.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = false; // 車自身は影を受けない方が自然な場合も
+                    }
+                });
+
+                scene.add(carMesh);
+                console.log("車両モデル読み込み完了");
+
+                // 物理車両の作成
+                createVehiclePhysics();
+                
+                // ArrowHelperをcarMeshに追加 (物理ボディではなく視覚モデルに)
+                // ただし、ArrowHelperはCannonシャシーの向きを示すため、
+                // gltf.sceneの回転と物理シャシーの回転が同期していれば問題ない。
+                // ここでは物理シャシー作成後に、その向きを示すものを別途表示するか、
+                // carMeshの向きが物理シャシーと完全に一致することを前提とする。
+                // const arrowHelper = new THREE.ArrowHelper( new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, chassisHeight / 2 + 0.2, 0), chassisDepth / 2, 0x00ff00, 0.6, 0.4 );
+                // carMesh.add(arrowHelper); // モデルが回転している場合、ヘルパーも一緒に回転する
+
+            }, undefined, (error) => {
+                console.error('モデルの読み込みに失敗しました:', error);
+                loadingElement.textContent = 'モデル読み込みエラー';
+            });
+        }
+
+
+        function createVehiclePhysics() {
+            const chassisMaterialCannon = new CANNON.Material("chassis");
+            // 物理シャシーの形状とオフセット
+            // GLBモデルの原点が底面中央にあると仮定し、物理形状の中心がY軸方向に少し上にくるように調整
+            const chassisShape = new CANNON.Box(new CANNON.Vec3(chassisDepth / 2, chassisHeight / 2, chassisWidth / 2));
+            const chassisShapeOffset = new CANNON.Vec3(0, chassisHeight / 2, 0); // オフセットで物理形状を少し上に
+
+            chassisBody = new CANNON.Body({
+                mass: massVehicle,
+                material: chassisMaterialCannon,
+                // position: initialPosition, // 初期位置はモデル読み込み後に設定した方が良い場合も
+                // quaternion: initialQuaternion
+            });
+            // chassisBody.addShape(chassisShape, chassisShapeOffset); // オフセット付きで形状追加
+            chassisBody.addShape(chassisShape); // オフセットなしで形状追加、モデルのY座標で調整
+            chassisBody.position.copy(initialPosition);
+            chassisBody.quaternion.copy(initialQuaternion);
+
+            chassisBody.angularDamping = 0.6; // 回転の減衰を少し強く
+            world.addBody(chassisBody);
+
+
+            vehicle = new CANNON.RaycastVehicle({
+                chassisBody: chassisBody,
+                indexRightAxis: 2, indexForwardAxis: 0, indexUpAxis: 1
+            });
+
+            const wheelOptions = {
+                radius: wheelRadius,
+                directionLocal: new CANNON.Vec3(0, -1, 0), // Y軸下向き
+                suspensionStiffness: 40,    
+                suspensionRestLength: 0.1,  // サス長を短く (車高低め)
+                frictionSlip: 3.0,         // グリップ力UP
+                dampingRelaxation: 2.8,    
+                dampingCompression: 4.0,   
+                maxSuspensionForce: 200000, // サスが耐える力
+                rollInfluence: 0.02,        
+                axleLocal: new CANNON.Vec3(0, 0, 1), // Z軸まわりに回転
+                chassisConnectionPointLocal: new CANNON.Vec3(),
+                maxSuspensionTravel: 0.15,   // サストローク
+                customSlidingRotationalSpeed: -35,
+                useCustomSlidingRotationalSpeed: true,
+            };
+            const wheelMaterialCannon = new CANNON.Material("wheel");
+
+            // ホイールの接続位置: (X:前後, Y:上下, Z:左右)
+            // Y座標はシャシー底面からの高さを考慮 (chassisHeightの半分マイナスサス自然長程度)
+            const wheelYPos = -chassisHeight * 0.15; // ホイール取り付けY位置を調整 (低め)
+
+            // Front wheels
+            wheelOptions.isFrontWheel = true;
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.38, wheelYPos, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(chassisDepth * 0.38, wheelYPos, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            // Rear wheels
+            wheelOptions.isFrontWheel = false;
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.40, wheelYPos, wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+            wheelOptions.chassisConnectionPointLocal.set(-chassisDepth * 0.40, wheelYPos, -wheelAxisPosition);
+            vehicle.addWheel({...wheelOptions, material: wheelMaterialCannon});
+
+            vehicle.addToWorld(world);
+            
+            // Contact Materials
+            const wheel_ground = new CANNON.ContactMaterial(wheelMaterialCannon, groundBody.material, {
+                friction: 0.9, 
+                restitution: 0.05,
+                contactEquationStiffness: 1000,
+                frictionEquationStiffness: 1e7, // 摩擦の計算安定性
+                frictionEquationRelaxation: 4    // 摩擦の計算安定性
+            });
+            world.addContactMaterial(wheel_ground);
+
+            const chassis_ground = new CANNON.ContactMaterial(chassisMaterialCannon, groundBody.material, {
+                friction: 0.1, restitution: 0.0
+            });
+            world.addContactMaterial(chassis_ground);
+        }
+
+
+        function createGround() { /* ... (変更なし) ... */ }
+        onWindowResize = () => { /* ... (変更なし) ... */ };
+        onKeyDown = (event) => { /* ... (変更なし) ... */ };
+        onKeyUp = (event) => { /* ... (変更なし) ... */ };
+        resetVehicle = () => { /* ... (変更なし、ただしinitialPosition/Quaternionはモデルに合わせて調整の可能性) ... */
+            if (chassisBody && vehicle) {
+                chassisBody.position.copy(initialPosition);
+                chassisBody.quaternion.copy(initialQuaternion);
+                chassisBody.velocity.set(0, 0, 0);
+                chassisBody.angularVelocity.set(0, 0, 0);
+                vehicle.reset();
+            }
+        };
+        
+        function updateVehicle() {
+            if (!vehicle || !chassisBody) return; // 物理ボディ未作成時はスキップ
+
+            const { acceleration, braking, left, right } = vehicleSteeringState;
+            const localVelocity = chassisBody.vectorToLocalFrame(chassisBody.velocity);
+            const forwardSpeed = localVelocity.x; 
+            const absForwardSpeed = Math.abs(forwardSpeed);
+
+            let currentEngineForce = engineBaseForce;
+            if (absForwardSpeed > forceHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - forceHighSpeedThreshold;
+                const factor = Math.max(forceMinFactorAtHighSpeed, 1 - speedExcess / forceReductionSpeedRange);
+                currentEngineForce *= factor;
+            }
+            
+            let currentMaxSteer = baseMaxSteerVal;
+            if (absForwardSpeed > steerHighSpeedThreshold) {
+                const speedExcess = absForwardSpeed - steerHighSpeedThreshold;
+                const factor = Math.max(steerMinFactorAtHighSpeed, 1 - speedExcess / steerReductionSpeedRange);
+                currentMaxSteer *= factor;
+            }
+
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.applyEngineForce(0, i);
+                vehicle.setBrake(0, i);
+
+                if (i === 2 || i === 3) { // 後輪駆動
+                    if (acceleration) {
+                        vehicle.applyEngineForce(currentEngineForce, i);
+                    }
+                }
+
+                if (braking) {
+                    if (forwardSpeed > 0.1) { 
+                        vehicle.setBrake(brakeForce, i);
+                    } else { 
+                        if (i === 2 || i === 3) {
+                            vehicle.applyEngineForce(-currentEngineForce * 0.7, i); // 後進力調整
+                        }
+                    }
+                }
+            }
+
+            const steerWheelIndices = [0, 1];
+            if (left) {
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(currentMaxSteer, steerWheelIndices[1]);
+            } else if (right) {
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[0]);
+                vehicle.setSteeringValue(-currentMaxSteer, steerWheelIndices[1]);
+            } else {
+                vehicle.setSteeringValue(0, steerWheelIndices[0]);
+                vehicle.setSteeringValue(0, steerWheelIndices[1]);
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = 1 / 60; 
+            world.step(deltaTime);
+            if (vehicle) updateVehicle(); // vehicle が初期化されてから呼ぶ
+
+            if (carMesh && chassisBody) { // carMesh が読み込まれてから同期
+                carMesh.position.copy(chassisBody.position);
+                // モデルのY軸オフセット（原点が底面の場合など）をここで補正
+                // carMesh.position.y -= chassisHeight / 2; // 例：物理形状の中心とモデルの原点を合わせる
+                carMesh.quaternion.copy(chassisBody.quaternion);
+            }
+
+            // Cannon.jsのホイールメッシュは表示しないので、以下の同期処理は不要
+            /*
+            if (vehicle && wheelMeshes.length === vehicle.wheelInfos.length) {
+                for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                    vehicle.updateWheelTransform(i);
+                    const transform = vehicle.wheelInfos[i].worldTransform;
+                    wheelMeshes[i].position.copy(transform.position);
+                    wheelMeshes[i].quaternion.copy(transform.quaternion);
+                }
+            }
+            */
+            renderer.render(scene, camera);
+        }
+        
+        // createGroundとresetVehicleの関数定義をここに移動（init内で呼び出すため）
+        createGround = () => {
+            const groundGeometry = new THREE.PlaneGeometry(150, 150); // 地面を広く
+            const groundMaterialThree = new THREE.MeshStandardMaterial({ // StandardMaterialに変更
+                color: 0x555555,
+                metalness: 0.1,
+                roughness: 0.8,
+            });
+            groundMesh = new THREE.Mesh(groundGeometry, groundMaterialThree);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+
+            const groundMaterialCannon = new CANNON.Material("ground");
+            groundBody = new CANNON.Body({ mass: 0, material: groundMaterialCannon });
+            groundBody.addShape(new CANNON.Plane());
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+        };
+
+        init();
+    </script>
+</body>
+</html>

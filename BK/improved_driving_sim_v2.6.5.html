@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Driving Simulation - Fixed Ramps & Items</title>
+    <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #ff8c42;
+          overflow: hidden;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          color: white;
+        }
+        
+        .info-overlay {
+          position: absolute;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          text-align: center;
+          font-weight: bold;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          z-index: 10;
+          background-color: rgba(0, 0, 0, 0.5);
+          padding: 15px 25px;
+          border-radius: 8px;
+        }
+
+        .boost-indicator {
+          position: fixed;
+          top: 20px;
+          left: 20px;
+          background-color: rgba(255, 100, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 18px;
+          font-weight: bold;
+          z-index: 100;
+          display: none;
+        }
+
+        .items-collected {
+          position: fixed;
+          top: 80px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          z-index: 100;
+          min-width: 200px;
+        }
+
+        .item-display {
+          display: flex;
+          align-items: center;
+          margin: 5px 0;
+          padding: 8px;
+          background-color: rgba(255, 255, 255, 0.1);
+          border-radius: 4px;
+          border-left: 4px solid;
+        }
+
+        .item-display.coin {
+          border-left-color: #FFD700;
+        }
+
+        .item-display.gem {
+          border-left-color: #FF69B4;
+        }
+
+        .item-display.power {
+          border-left-color: #00FF00;
+        }
+
+        .item-icon {
+          font-size: 20px;
+          margin-right: 10px;
+        }
+        
+        .key-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 10px;
+          gap: 5px;
+        }
+        
+        .key {
+          background-color: white;
+          color: #333;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          border-radius: 4px;
+          font-weight: bold;
+        }
+        
+        .loading-status {
+          position: fixed;
+          bottom: 20px;
+          left: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 10px 15px;
+          border-radius: 4px;
+          font-size: 14px;
+          z-index: 100;
+        }
+
+        .speed-indicator {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background-color: rgba(0, 0, 0, 0.7);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 16px;
+          font-weight: bold;
+          z-index: 100;
+        }
+
+        .debug-panel {
+          position: fixed;
+          top: 120px;
+          right: 20px;
+          background-color: rgba(255, 0, 0, 0.8);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: bold;
+          z-index: 100;
+          border: 2px solid #ff6666;
+        }
+
+        .debug-controls {
+          margin-top: 10px;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+        
+        #game-canvas {
+          width: 100%;
+          height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="info-overlay">
+        <div>Use arrow keys - SPACE for BOOST! - Collect items! - Cannon.js Physics Engine</div>
+        <div class="key-controls">
+            <div class="key">↑</div>
+            <div class="key">←</div>
+            <div class="key">↓</div>
+            <div class="key">→</div>
+            <div class="key">SPACE</div>
+        </div>
+    </div>
+    
+    <div class="loading-status" id="loading-status">ロード中...</div>
+    <div class="speed-indicator" id="speed-indicator">速度: 0 km/h</div>
+    <div class="boost-indicator" id="boost-indicator">🔥 BOOST ACTIVE! 🔥</div>
+    
+    <div class="debug-panel" id="debug-panel">
+        <div>🔧 デバッグモード - Cannon.js物理エンジン</div>
+        <div>コリジョン高さ: <span id="collision-height">0.0</span></div>
+        <div>地面高さ: <span id="ground-height">0.0</span></div>
+        <div>車の高さ: <span id="car-height">0.0</span></div>
+        <div>物理速度: <span id="physics-speed">0.0</span> m/s</div>
+        <div>タイヤ数: <span id="wheel-count">4</span></div>
+        <div>コリジョン方式: <span id="collision-method">Cannon.js Cylinder</span></div>
+        <div class="debug-controls">
+          PageUp/Down: コリジョン高さ調整<br>
+          C: 中央ボックス表示切替<br>
+          W: 4輪タイヤ（円形）表示切替<br>
+          Q: コリジョン方式切替<br>
+          H: デバッグパネル表示切替
+        </div>
+    </div>
+    
+    <div class="items-collected" id="items-collected">
+        <div style="font-size: 14px; margin-bottom: 10px; text-align: center; color: #FFD700;">🏆 アイテム収集 🏆</div>
+        <div class="item-display coin">
+            <span class="item-icon">🪙</span>
+            <span>コイン: <span id="coin-count">0</span></span>
+        </div>
+        <div class="item-display gem">
+            <span class="item-icon">💎</span>
+            <span>ジェム: <span id="gem-count">0</span></span>
+        </div>
+        <div class="item-display power">
+            <span class="item-icon">⚡</span>
+            <span>パワーアップ: <span id="power-count">0</span></span>
+        </div>
+    </div>
+    
+    <script type="module">
+        // Three.js and Cannon.js implementation for 3D driving simulation with realistic physics
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.126.0/build/three.module.js';
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.126.0/examples/jsm/loaders/DRACOLoader.js';
+        
+        // Import Cannon.js physics engine
+        import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon@0.20.0/build/cannon.min.js';
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xff8c42);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        
+        // Physics world setup
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0);
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+        
+        // Materials for physics
+        const groundMaterial = new CANNON.Material('ground');
+        const wheelMaterial = new CANNON.Material('wheel');
+        const carMaterial = new CANNON.Material('car');
+        
+        // Contact materials (friction settings)
+        const wheelGroundContact = new CANNON.ContactMaterial(wheelMaterial, groundMaterial, {
+            friction: 0.8,
+            restitution: 0.3
+        });
+        world.addContactMaterial(wheelGroundContact);
+        
+        // Set camera position for angled top-down view
+        camera.position.set(15, 20, 15);
+        camera.lookAt(0, 0, 0);
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(20, 30, 20);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.near = 0.5;
+        directionalLight.shadow.camera.far = 500;
+        directionalLight.shadow.camera.left = -50;
+        directionalLight.shadow.camera.right = 50;
+        directionalLight.shadow.camera.top = 50;
+        directionalLight.shadow.camera.bottom = -50;
+        scene.add(directionalLight);
+        
+        // Create expanded ground with physics
+        const groundGeometry = new THREE.PlaneGeometry(500, 500);
+        const groundMaterial3D = new THREE.MeshStandardMaterial({ 
+            color: 0xff8c42,
+            roughness: 0.8
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial3D);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Ground physics body
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        world.add(groundBody);
+        
+        // Store all collidable objects and items
+        const collidableObjects = [];
+        const collectibleItems = [];
+        const itemCounts = {
+            coins: 0,
+            gems: 0,
+            powerups: 0
+        };
+        
+        // Create trees with collision boxes
+        function createTree(x, z) {
+            const tree = new THREE.Group();
+            
+            // Trunk
+            const trunkGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+            const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.y = 1;
+            trunk.castShadow = true;
+            tree.add(trunk);
+            
+            // Foliage (simplified box for better collision)
+            const foliageGeometry = new THREE.BoxGeometry(3, 3, 3);
+            const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+            const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
+            foliage.position.y = 3.5;
+            foliage.castShadow = true;
+            tree.add(foliage);
+            
+            tree.position.set(x, 0, z);
+            tree.userData = {
+                type: 'tree',
+                radius: 2,
+                height: 5
+            };
+            
+            collidableObjects.push(tree);
+            return tree;
+        }
+        
+        // Create improved ramps with smoother transitions
+        function createRamp(x, z, width, height, depth, rotation = 0) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x808080,
+                metalness: 0.2,
+                roughness: 0.8
+            });
+            const ramp = new THREE.Mesh(geometry, material);
+            
+            ramp.position.set(x, height/2, z);
+            ramp.rotation.y = rotation;
+            ramp.castShadow = true;
+            ramp.receiveShadow = true;
+            
+            ramp.userData = {
+                type: 'ramp',
+                width: width,
+                height: height,
+                depth: depth,
+                rotation: rotation
+            };
+            
+            collidableObjects.push(ramp);
+            return ramp;
+        }
+        
+        // Create smooth jump ramps
+        function createJumpRamp(x, z, angle = Math.PI / 6) {
+            const width = 8;
+            const length = 12;
+            const height = 3;
+            
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 0);
+            shape.lineTo(length, 0);
+            shape.lineTo(0, height);
+            shape.closePath();
+            
+            const extrudeSettings = {
+                depth: width,
+                bevelEnabled: false
+            };
+            
+            const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0xFFD700,
+                metalness: 0.3,
+                roughness: 0.7
+            });
+            const jumpRamp = new THREE.Mesh(geometry, material);
+            
+            jumpRamp.position.set(x - width/2, 0, z - length/2);
+            jumpRamp.castShadow = true;
+            jumpRamp.receiveShadow = true;
+            
+            jumpRamp.userData = {
+                type: 'jumpRamp',
+                width: width,
+                height: height,
+                length: length
+            };
+            
+            collidableObjects.push(jumpRamp);
+            return jumpRamp;
+        }
+        
+        // Create collectible items
+        function createCollectibleItem(x, z, type) {
+            const group = new THREE.Group();
+            
+            let geometry, material, color, icon;
+            
+            switch(type) {
+                case 'coin':
+                    geometry = new THREE.CylinderGeometry(0.8, 0.8, 0.2, 12);
+                    color = 0xFFD700;
+                    icon = '🪙';
+                    break;
+                case 'gem':
+                    geometry = new THREE.OctahedronGeometry(0.8);
+                    color = 0xFF69B4;
+                    icon = '💎';
+                    break;
+                case 'powerup':
+                    geometry = new THREE.SphereGeometry(0.8, 12, 8);
+                    color = 0x00FF00;
+                    icon = '⚡';
+                    break;
+            }
+            
+            material = new THREE.MeshStandardMaterial({ 
+                color: color,
+                metalness: 0.8,
+                roughness: 0.2,
+                emissive: color,
+                emissiveIntensity: 0.1
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            // Add glow effect
+            const glowGeometry = geometry.clone();
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.3
+            });
+            const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+            glow.scale.setScalar(1.2);
+            
+            group.add(mesh);
+            group.add(glow);
+            group.position.set(x, 1, z);
+            
+            group.userData = {
+                type: 'collectible',
+                itemType: type,
+                collected: false,
+                originalY: 1,
+                rotationSpeed: 0.02 + Math.random() * 0.02,
+                bobSpeed: 0.03 + Math.random() * 0.02,
+                icon: icon
+            };
+            
+            collectibleItems.push(group);
+            return group;
+        }
+        
+        // Add trees in strategic positions
+        const trees = [
+            createTree(-15, 10),
+            createTree(15, 15),
+            createTree(-20, -15),
+            createTree(25, -10),
+            createTree(-35, 25),
+            createTree(35, -25),
+            createTree(-50, 0),
+            createTree(50, 5),
+            createTree(0, 40),
+            createTree(5, -40),
+            createTree(-60, 40),
+            createTree(60, -40),
+            createTree(-30, -30),
+            createTree(30, 30)
+        ];
+        trees.forEach(tree => scene.add(tree));
+        
+        // Add ramps and obstacles
+        const obstacles = [
+            createRamp(-20, -20, 12, 3, 8, 0),
+            createRamp(20, 20, 10, 3, 10, Math.PI/4),
+            createRamp(-40, 10, 8, 2, 8, Math.PI/2),
+            createRamp(40, -10, 10, 2.5, 8, -Math.PI/4),
+            createJumpRamp(-30, 0),
+            createJumpRamp(30, 0),
+            createJumpRamp(0, -50),
+            createJumpRamp(0, 50),
+            createRamp(-60, -30, 15, 4, 15, 0),
+            createRamp(60, 30, 15, 4, 15, 0)
+        ];
+        obstacles.forEach(obstacle => scene.add(obstacle));
+        
+        // Add collectible items around the map
+        const items = [
+            createCollectibleItem(-10, 5, 'coin'),
+            createCollectibleItem(10, -5, 'coin'),
+            createCollectibleItem(-25, 20, 'gem'),
+            createCollectibleItem(25, -20, 'gem'),
+            createCollectibleItem(0, 25, 'powerup'),
+            createCollectibleItem(0, -25, 'powerup'),
+            createCollectibleItem(-45, 0, 'coin'),
+            createCollectibleItem(45, 0, 'coin'),
+            createCollectibleItem(-15, -35, 'gem'),
+            createCollectibleItem(15, 35, 'gem'),
+            createCollectibleItem(-55, 45, 'powerup'),
+            createCollectibleItem(55, -45, 'powerup'),
+            createCollectibleItem(-35, -15, 'coin'),
+            createCollectibleItem(35, 15, 'coin'),
+            createCollectibleItem(0, 0, 'gem')
+        ];
+        items.forEach(item => scene.add(item));
+        
+        // Car physics variables with Cannon.js integration
+        let car;
+        let carBody; // Physics body
+        let wheelBodies = []; // Physics bodies for wheels
+        let wheelMeshes = []; // Visual wheel meshes
+        let wheelConstraints = []; // Wheel constraints
+        
+        const carPhysics = {
+            velocity: new THREE.Vector3(0, 0, 0),
+            acceleration: new THREE.Vector3(0, 0, 0),
+            rotation: 0,
+            angularVelocity: 0,
+            mass: 1000,
+            enginePower: 6000,
+            maxSpeed: 3.0,
+            friction: 0.94,
+            airResistance: 0.98,
+            brakeForce: 0.85,
+            turnRadius: 0.06,
+            boostPower: 12000,
+            isGrounded: true,
+            verticalVelocity: 0,
+            gravity: 0.025,
+            previousSpeed: 0,
+            carBounds: {
+                width: 2,
+                length: 4,
+                height: 1
+            },
+            collisionHeightOffset: 0.0,
+            wheelRadius: 0.5,
+            wheelWidth: 0.3
+        };
+
+        // Create car physics body and wheels
+        function createCarPhysics() {
+            // Car body (chassis)
+            const carShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2));
+            carBody = new CANNON.Body({ mass: carPhysics.mass, material: carMaterial });
+            carBody.addShape(carShape);
+            carBody.position.set(0, 2, 0);
+            world.add(carBody);
+            
+            // Wheel positions relative to car
+            const wheelPositions = [
+                new CANNON.Vec3(0.8, -0.3, 1.2),   // Front right
+                new CANNON.Vec3(-0.8, -0.3, 1.2),  // Front left
+                new CANNON.Vec3(0.8, -0.3, -1.2),  // Rear right
+                new CANNON.Vec3(-0.8, -0.3, -1.2)  // Rear left
+            ];
+            
+            // Create wheel bodies with cylindrical shape
+            wheelPositions.forEach((position, index) => {
+                // Physics cylinder for wheel (radius, height)
+                const wheelShape = new CANNON.Cylinder(
+                    carPhysics.wheelRadius,
+                    carPhysics.wheelRadius,
+                    carPhysics.wheelWidth,
+                    8
+                );
+                
+                const wheelBody = new CANNON.Body({ 
+                    mass: 50,
+                    material: wheelMaterial
+                });
+                wheelBody.addShape(wheelShape);
+                
+                // Position wheel relative to car
+                wheelBody.position.set(
+                    carBody.position.x + position.x,
+                    carBody.position.y + position.y,
+                    carBody.position.z + position.z
+                );
+                
+                // Rotate wheel to be vertical
+                wheelBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+                
+                world.add(wheelBody);
+                wheelBodies.push(wheelBody);
+                
+                // Visual wheel mesh
+                const wheelGeometry = new THREE.CylinderGeometry(
+                    carPhysics.wheelRadius,
+                    carPhysics.wheelRadius,
+                    carPhysics.wheelWidth,
+                    16
+                );
+                const wheelMaterial3D = new THREE.MeshStandardMaterial({ 
+                    color: 0x333333,
+                    metalness: 0.7,
+                    roughness: 0.3
+                });
+                const wheelMesh = new THREE.Mesh(wheelGeometry, wheelMaterial3D);
+                wheelMesh.castShadow = true;
+                wheelMesh.receiveShadow = true;
+                scene.add(wheelMesh);
+                wheelMeshes.push(wheelMesh);
+                
+                // Connect wheel to car with point-to-point constraint
+                const constraint = new CANNON.PointToPointConstraint(
+                    carBody,
+                    position,
+                    wheelBody,
+                    new CANNON.Vec3(0, 0, 0)
+                );
+                world.addConstraint(constraint);
+                wheelConstraints.push(constraint);
+            });
+            
+            console.log('車両物理システム初期化完了');
+            console.log('車体質量:', carPhysics.mass, 'kg');
+            console.log('タイヤ数:', wheelBodies.length);
+            console.log('タイヤ半径:', carPhysics.wheelRadius, 'm');
+        }
+
+        // Debug variables
+        const debugState = {
+            showCollisionBox: false,
+            showWheelCollision: false,
+            showDebugPanel: true,
+            use4WheelCollision: false,
+            collisionBoxHelper: null,
+            wheelCollisionHelpers: []
+        };
+        
+        // Particle system for drift smoke
+        const driftParticles = [];
+        const maxDriftParticles = 150;
+        
+        // Create realistic drift smoke particles
+        function createDriftParticle(position, carVelocity, carRotation, wheelOffset, smokeType = 'tire') {
+            const geometry = new THREE.SphereGeometry(smokeType === 'exhaust' ? 0.2 : 0.3, 6, 4);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: smokeType === 'exhaust' ? 0x888888 : 0xcccccc, 
+                transparent: true, 
+                opacity: smokeType === 'exhaust' ? 0.4 : 0.6
+            });
+            const particle = new THREE.Mesh(geometry, material);
+            
+            particle.position.copy(position);
+            particle.position.y = smokeType === 'exhaust' ? 0.5 : 0.1;
+            
+            const baseVelocity = carVelocity.clone().multiplyScalar(smokeType === 'exhaust' ? -0.5 : -0.3);
+            const lateralDispersion = new THREE.Vector3(
+                Math.cos(carRotation + Math.PI/2) * wheelOffset * 0.1,
+                0,
+                -Math.sin(carRotation + Math.PI/2) * wheelOffset * 0.1
+            );
+            
+            particle.velocity = baseVelocity.add(lateralDispersion);
+            particle.velocity.y = smokeType === 'exhaust' ? 
+                Math.random() * 0.1 + 0.05 : 
+                Math.random() * 0.05 + 0.02;
+            particle.velocity.x += (Math.random() - 0.5) * 0.1;
+            particle.velocity.z += (Math.random() - 0.5) * 0.1;
+            
+            particle.life = 1.0;
+            particle.scale.setScalar((smokeType === 'exhaust' ? 0.2 : 0.3) + Math.random() * 0.2);
+            particle.userData.type = smokeType;
+            
+            scene.add(particle);
+            driftParticles.push(particle);
+            
+            if (driftParticles.length > maxDriftParticles) {
+                const oldParticle = driftParticles.shift();
+                scene.remove(oldParticle);
+                oldParticle.geometry.dispose();
+                oldParticle.material.dispose();
+            }
+        }
+        
+        // Create smoke from wheel positions
+        function createWheelSmoke(car, carPhysics, steeringDirection, intensity = 1, smokeType = 'tire') {
+            if (!car || (!carPhysics.isGrounded && smokeType === 'tire')) return;
+            
+            const carRotation = car.rotation.y;
+            const carVelocity = carPhysics.velocity.clone();
+            
+            if (smokeType === 'exhaust') {
+                const exhaustOffsets = [
+                    {x: 0.5, z: -2.0},
+                    {x: -0.5, z: -2.0}
+                ];
+                
+                exhaustOffsets.forEach(offset => {
+                    const exhaustWorldPos = new THREE.Vector3(
+                        car.position.x + Math.cos(carRotation) * offset.x - Math.sin(carRotation) * offset.z,
+                        car.position.y,
+                        car.position.z + Math.sin(carRotation) * offset.x + Math.cos(carRotation) * offset.z
+                    );
+                    
+                    const particleCount = Math.floor(1 * intensity);
+                    for (let i = 0; i < particleCount; i++) {
+                        createDriftParticle(exhaustWorldPos, carVelocity, carRotation, offset.x, 'exhaust');
+                    }
+                });
+            } else {
+                const wheelOffsets = [
+                    {x: 0.8, z: -1.2},
+                    {x: -0.8, z: -1.2}
+                ];
+                
+                wheelOffsets.forEach(offset => {
+                    const wheelWorldPos = new THREE.Vector3(
+                        car.position.x + Math.cos(carRotation) * offset.x - Math.sin(carRotation) * offset.z,
+                        car.position.y,
+                        car.position.z + Math.sin(carRotation) * offset.x + Math.cos(carRotation) * offset.z
+                    );
+                    
+                    const particleCount = Math.floor(2 * intensity);
+                    for (let i = 0; i < particleCount; i++) {
+                        createDriftParticle(wheelWorldPos, carVelocity, carRotation, offset.x, 'tire');
+                    }
+                });
+            }
+        }
+        
+        // Update drift particles
+        function updateDriftParticles() {
+            for (let i = driftParticles.length - 1; i >= 0; i--) {
+                const particle = driftParticles[i];
+                
+                particle.position.add(particle.velocity);
+                
+                if (particle.userData.type === 'exhaust') {
+                    particle.velocity.multiplyScalar(0.94);
+                    particle.velocity.y += 0.002;
+                    particle.life -= 0.025;
+                    particle.scale.setScalar(particle.scale.x + 0.03);
+                } else {
+                    particle.velocity.multiplyScalar(0.96);
+                    particle.velocity.y -= 0.001;
+                    particle.life -= 0.02;
+                    particle.scale.setScalar(particle.scale.x + 0.02);
+                }
+                
+                particle.material.opacity = particle.life * (particle.userData.type === 'exhaust' ? 0.4 : 0.6);
+                
+                if (particle.life <= 0 || particle.position.y < -1) {
+                    scene.remove(particle);
+                    particle.geometry.dispose();
+                    particle.material.dispose();
+                    driftParticles.splice(i, 1);
+                }
+            }
+        }
+        
+        // Update collectible items animation
+        function updateCollectibleItems() {
+            const time = Date.now() * 0.001;
+            
+            collectibleItems.forEach(item => {
+                if (!item.userData.collected) {
+                    // Rotation animation
+                    item.rotation.y += item.userData.rotationSpeed;
+                    
+                    // Bobbing animation
+                    item.position.y = item.userData.originalY + Math.sin(time * item.userData.bobSpeed * 10) * 0.3;
+                    
+                    // Pulsing glow effect
+                    const glowMesh = item.children[1];
+                    if (glowMesh) {
+                        const pulseScale = 1.2 + Math.sin(time * 3) * 0.1;
+                        glowMesh.scale.setScalar(pulseScale);
+                    }
+                }
+            });
+        }
+        
+        // Check item collection
+        function checkItemCollection() {
+            if (!car) return;
+            
+            collectibleItems.forEach(item => {
+                if (!item.userData.collected) {
+                    const distance = car.position.distanceTo(item.position);
+                    if (distance < 2.5) {
+                        // Collect the item
+                        item.userData.collected = true;
+                        scene.remove(item);
+                        
+                        // Update counters
+                        switch(item.userData.itemType) {
+                            case 'coin':
+                                itemCounts.coins++;
+                                document.getElementById('coin-count').textContent = itemCounts.coins;
+                                break;
+                            case 'gem':
+                                itemCounts.gems++;
+                                document.getElementById('gem-count').textContent = itemCounts.gems;
+                                break;
+                            case 'powerup':
+                                itemCounts.powerups++;
+                                document.getElementById('power-count').textContent = itemCounts.powerups;
+                                break;
+                        }
+                        
+                        // Create collection effect
+                        createCollectionEffect(item.position, item.userData.itemType);
+                    }
+                }
+            });
+        }
+        
+        // Create collection effect
+        function createCollectionEffect(position, itemType) {
+            const colors = {
+                coin: 0xFFD700,
+                gem: 0xFF69B4,
+                powerup: 0x00FF00
+            };
+            
+            for (let i = 0; i < 8; i++) {
+                const geometry = new THREE.SphereGeometry(0.1, 6, 4);
+                const material = new THREE.MeshBasicMaterial({ 
+                    color: colors[itemType],
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const particle = new THREE.Mesh(geometry, material);
+                
+                particle.position.copy(position);
+                particle.velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    Math.random() * 0.15 + 0.1,
+                    (Math.random() - 0.5) * 0.2
+                );
+                particle.life = 1.0;
+                
+                scene.add(particle);
+                driftParticles.push(particle);
+            }
+        }
+        
+        const loadingStatus = document.getElementById('loading-status');
+        const speedIndicator = document.getElementById('speed-indicator');
+        const boostIndicator = document.getElementById('boost-indicator');
+        
+        // Set up DRACO loader
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
+        dracoLoader.setDecoderConfig({ type: 'js' });
+        
+        // Set up GLTF loader with DRACO support
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+        
+        // Load car model
+        loader.load(
+            'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/ferrari.glb', 
+            function(gltf) {
+                car = gltf.scene;
+                car.scale.set(0.6, 0.6, 0.6);
+                car.castShadow = true;
+                
+                car.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                scene.add(car);
+                
+                // Initialize physics after car is loaded
+                createCarPhysics();
+                
+                // Initialize collision helpers
+                updateCollisionBoxHelper();
+                updateWheelCollisionHelpers();
+                
+                // Initialize debug info display
+                setTimeout(() => {
+                    updateDebugInfo();
+                }, 100);
+                
+                loadingStatus.textContent = "ロード完了！物理エンジン初期化済み";
+                loadingStatus.style.backgroundColor = "rgba(0, 128, 0, 0.7)";
+                
+                setTimeout(() => {
+                    loadingStatus.style.opacity = "0";
+                    loadingStatus.style.transition = "opacity 1s";
+                }, 3000);
+            },
+            function(xhr) {
+                if (xhr.total === 0) {
+                    loadingStatus.textContent = `ロード中...`;
+                } else {
+                    const percentComplete = xhr.loaded / xhr.total * 100;
+                    loadingStatus.textContent = `ロード中...${Math.round(percentComplete)}%`;
+                }
+            },
+            function(error) {
+                console.error(error);
+                loadingStatus.textContent = "ロード失敗！";
+                loadingStatus.style.backgroundColor = "rgba(255, 0, 0, 0.7)";
+            }
+        );
+        
+        const keyState = {};
+        
+        window.addEventListener('keydown', (e) => {
+            keyState[e.key] = true;
+            keyState[e.code] = true;
+            
+            // 全てのキー入力をログ出力（デバッグ用）
+            if (['KeyQ', 'KeyC', 'KeyW', 'KeyH', 'PageUp', 'PageDown'].includes(e.code)) {
+                console.log('キー押下:', e.code, e.key);
+            }
+            
+            // Debug controls
+            if (e.code === 'PageUp') {
+                carPhysics.collisionHeightOffset += 0.1;
+                updateCollisionBoxHelper();
+                updateWheelCollisionHelpers();
+                e.preventDefault();
+            } else if (e.code === 'PageDown') {
+                carPhysics.collisionHeightOffset -= 0.1;
+                updateCollisionBoxHelper();
+                updateWheelCollisionHelpers();
+                e.preventDefault();
+            } else if (e.code === 'KeyC') {
+                debugState.showCollisionBox = !debugState.showCollisionBox;
+                console.log('中央ボックス表示切り替え:', debugState.showCollisionBox);
+                updateCollisionBoxHelper();
+                e.preventDefault();
+            } else if (e.code === 'KeyW') {
+                debugState.showWheelCollision = !debugState.showWheelCollision;
+                console.log('4輪コリジョン表示切り替え:', debugState.showWheelCollision);
+                updateWheelCollisionHelpers();
+                e.preventDefault();
+            } else if (e.code === 'KeyQ') {
+                const previousState = debugState.use4WheelCollision;
+                debugState.use4WheelCollision = !debugState.use4WheelCollision;
+                
+                console.log('=== コリジョン方式切り替え ===');
+                console.log('前の状態:', previousState ? '4輪個別' : '中央ボックス');
+                console.log('新しい状態:', debugState.use4WheelCollision ? '4輪個別' : '中央ボックス');
+                console.log('debugState.use4WheelCollision:', debugState.use4WheelCollision);
+                
+                // 強制的にデバッグ情報を更新
+                setTimeout(() => {
+                    updateDebugInfo();
+                }, 10);
+                
+                e.preventDefault();
+            } else if (e.code === 'KeyH') {
+                debugState.showDebugPanel = !debugState.showDebugPanel;
+                console.log('デバッグパネル表示切り替え:', debugState.showDebugPanel);
+                const debugPanel = document.getElementById('debug-panel');
+                debugPanel.style.display = debugState.showDebugPanel ? 'block' : 'none';
+                e.preventDefault();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keyState[e.key] = false;
+            keyState[e.code] = false;
+        });
+        
+        // Get 4 wheel positions based on car position and rotation
+        function getWheelPositions(carPosition, carRotation) {
+            const wheelOffsets = [
+                { x: 0.8, z: 1.5 },   // Front right
+                { x: -0.8, z: 1.5 },  // Front left  
+                { x: 0.8, z: -1.5 },  // Rear right
+                { x: -0.8, z: -1.5 }  // Rear left
+            ];
+            
+            return wheelOffsets.map(offset => {
+                const cos = Math.cos(carRotation);
+                const sin = Math.sin(carRotation);
+                
+                return new THREE.Vector3(
+                    carPosition.x + cos * offset.x - sin * offset.z,
+                    carPosition.y,
+                    carPosition.z + sin * offset.x + cos * offset.z
+                );
+            });
+        }
+
+        // Advanced 4-wheel collision detection with circular wheels
+        function checkCollisionAdvanced(testPosition, carRotation) {
+            if (!car) return false;
+            
+            const wheelPositions = getWheelPositions(testPosition, carRotation);
+            
+            // Check each wheel position with circular collision
+            for (let i = 0; i < wheelPositions.length; i++) {
+                const wheelPos = wheelPositions[i];
+                wheelPos.y += carPhysics.collisionHeightOffset;
+                
+                const wheelRadius = 0.5; // タイヤの半径
+                
+                for (let obj of collidableObjects) {
+                    if (obj.userData.type === 'tree') {
+                        const distance = new THREE.Vector2(
+                            wheelPos.x - obj.position.x,
+                            wheelPos.z - obj.position.z
+                        ).length();
+                        
+                        if (distance < obj.userData.radius + wheelRadius) {
+                            return true;
+                        }
+                    } else {
+                        const objBox = new THREE.Box3().setFromObject(obj);
+                        
+                        // 円形とボックスの衝突判定
+                        const closestPoint = new THREE.Vector3(
+                            Math.max(objBox.min.x, Math.min(wheelPos.x, objBox.max.x)),
+                            Math.max(objBox.min.y, Math.min(wheelPos.y, objBox.max.y)),
+                            Math.max(objBox.min.z, Math.min(wheelPos.z, objBox.max.z))
+                        );
+                        
+                        const distance = wheelPos.distanceTo(closestPoint);
+                        if (distance < wheelRadius) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            
+            return false;
+        }
+
+        // Simple collision detection with height offset (original method)
+        function checkCollision(testPosition) {
+            if (!car) return false;
+            
+            const carBox = new THREE.Box3();
+            const carSize = new THREE.Vector3(2, 1, 4);
+            const adjustedPosition = testPosition.clone();
+            adjustedPosition.y += carPhysics.collisionHeightOffset;
+            
+            carBox.setFromCenterAndSize(adjustedPosition, carSize);
+            
+            for (let obj of collidableObjects) {
+                if (obj.userData.type === 'tree') {
+                    const distance = new THREE.Vector2(
+                        testPosition.x - obj.position.x,
+                        testPosition.z - obj.position.z
+                    ).length();
+                    
+                    if (distance < obj.userData.radius + 1) {
+                        return true;
+                    }
+                } else {
+                    const objBox = new THREE.Box3().setFromObject(obj);
+                    if (carBox.intersectsBox(objBox)) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+
+        // Create and update wheel collision helpers (circular wheels)
+        function updateWheelCollisionHelpers() {
+            if (!car) return;
+            
+            // Remove existing helpers
+            debugState.wheelCollisionHelpers.forEach(helper => {
+                scene.remove(helper);
+                helper.geometry.dispose();
+                helper.material.dispose();
+            });
+            debugState.wheelCollisionHelpers = [];
+            
+            // Create new helpers if needed
+            if (debugState.showWheelCollision) {
+                const wheelPositions = getWheelPositions(car.position, car.rotation.y);
+                const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00]; // Different colors for each wheel
+                const wheelLabels = ['前右', '前左', '後右', '後左'];
+                
+                wheelPositions.forEach((pos, index) => {
+                    // 円形（シリンダー）のタイヤ表現
+                    const geometry = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 12);
+                    const material = new THREE.MeshBasicMaterial({ 
+                        color: colors[index], 
+                        transparent: true, 
+                        opacity: 0.4,
+                        wireframe: true
+                    });
+                    const helper = new THREE.Mesh(geometry, material);
+                    helper.position.copy(pos);
+                    helper.position.y += carPhysics.collisionHeightOffset;
+                    helper.rotation.z = Math.PI / 2; // タイヤを横向きに
+                    scene.add(helper);
+                    debugState.wheelCollisionHelpers.push(helper);
+                    
+                    console.log(`タイヤ${wheelLabels[index]}の位置:`, pos.x.toFixed(1), pos.y.toFixed(1), pos.z.toFixed(1));
+                });
+            }
+        }
+
+        // Create and update collision box helper
+        function updateCollisionBoxHelper() {
+            if (!car) return;
+            
+            // Remove existing helper
+            if (debugState.collisionBoxHelper) {
+                scene.remove(debugState.collisionBoxHelper);
+                debugState.collisionBoxHelper.geometry.dispose();
+                debugState.collisionBoxHelper.material.dispose();
+                debugState.collisionBoxHelper = null;
+            }
+            
+            // Create new helper if needed
+            if (debugState.showCollisionBox) {
+                const geometry = new THREE.BoxGeometry(2, 1, 4);
+                const material = new THREE.MeshBasicMaterial({ 
+                    color: 0xff0000, 
+                    transparent: true, 
+                    opacity: 0.3,
+                    wireframe: true
+                });
+                debugState.collisionBoxHelper = new THREE.Mesh(geometry, material);
+                scene.add(debugState.collisionBoxHelper);
+            }
+        }
+
+        // Update debug info display
+        function updateDebugInfo() {
+            if (!car || !debugState.showDebugPanel) return;
+            
+            const groundHeight = getGroundHeight(car.position);
+            
+            document.getElementById('collision-height').textContent = carPhysics.collisionHeightOffset.toFixed(1);
+            document.getElementById('ground-height').textContent = groundHeight.toFixed(1);
+            document.getElementById('car-height').textContent = car.position.y.toFixed(1);
+            
+            // Update collision box helper position
+            if (debugState.collisionBoxHelper) {
+                debugState.collisionBoxHelper.position.copy(car.position);
+                debugState.collisionBoxHelper.position.y += carPhysics.collisionHeightOffset;
+                debugState.collisionBoxHelper.rotation.copy(car.rotation);
+            }
+            
+            // Update wheel collision helpers
+            if (debugState.showWheelCollision && debugState.wheelCollisionHelpers.length > 0) {
+                const wheelPositions = getWheelPositions(car.position, car.rotation.y);
+                debugState.wheelCollisionHelpers.forEach((helper, index) => {
+                    helper.position.copy(wheelPositions[index]);
+                    helper.position.y += carPhysics.collisionHeightOffset;
+                });
+            }
+        }
+        
+        // Improved ground height calculation with smoother transitions
+        function getGroundHeight(position) {
+            let maxHeight = 0;
+            const smoothingRadius = 2.0; // Radius for smooth transitions
+            
+            for (let obj of collidableObjects) {
+                if (obj.userData.type === 'ramp' || obj.userData.type === 'jumpRamp') {
+                    const objBox = new THREE.Box3().setFromObject(obj);
+                    
+                    // Expand the collision area for smoother transitions
+                    const expandedBox = objBox.clone();
+                    expandedBox.expandByScalar(smoothingRadius);
+                    
+                    if (position.x >= expandedBox.min.x && position.x <= expandedBox.max.x &&
+                        position.z >= expandedBox.min.z && position.z <= expandedBox.max.z) {
+                        
+                        // Calculate distance to actual ramp
+                        const distanceToRamp = Math.max(
+                            Math.max(objBox.min.x - position.x, position.x - objBox.max.x, 0),
+                            Math.max(objBox.min.z - position.z, position.z - objBox.max.z, 0)
+                        );
+                        
+                        let height = 0;
+                        
+                        if (obj.userData.type === 'jumpRamp') {
+                            if (distanceToRamp <= 0) {
+                                // Inside the ramp
+                                const relativeZ = position.z - obj.position.z;
+                                const rampProgress = Math.max(0, Math.min(1, (relativeZ + obj.userData.length/2) / obj.userData.length));
+                                height = rampProgress * obj.userData.height;
+                            } else if (distanceToRamp < smoothingRadius) {
+                                // In the smoothing zone
+                                const smoothFactor = 1 - (distanceToRamp / smoothingRadius);
+                                const relativeZ = position.z - obj.position.z;
+                                const rampProgress = Math.max(0, Math.min(1, (relativeZ + obj.userData.length/2) / obj.userData.length));
+                                height = rampProgress * obj.userData.height * smoothFactor;
+                            }
+                        } else {
+                            if (distanceToRamp <= 0) {
+                                // Inside the ramp
+                                height = objBox.max.y;
+                            } else if (distanceToRamp < smoothingRadius) {
+                                // In the smoothing zone - gradual height increase
+                                const smoothFactor = 1 - (distanceToRamp / smoothingRadius);
+                                height = objBox.max.y * smoothFactor;
+                            }
+                        }
+                        
+                        maxHeight = Math.max(maxHeight, height);
+                    }
+                }
+            }
+            
+            return maxHeight;
+        }
+        
+        // Update physics simulation
+        function updatePhysics() {
+            if (!carBody) return;
+            
+            const timeStep = 1 / 60;
+            world.step(timeStep);
+            
+            // Sync visual car with physics body
+            if (car) {
+                car.position.copy(carBody.position);
+                car.quaternion.copy(carBody.quaternion);
+            }
+            
+            // Sync visual wheels with physics bodies
+            wheelMeshes.forEach((wheelMesh, index) => {
+                if (wheelBodies[index]) {
+                    wheelMesh.position.copy(wheelBodies[index].position);
+                    wheelMesh.quaternion.copy(wheelBodies[index].quaternion);
+                }
+            });
+        }
+
+        // Apply forces to car based on input
+        function applyCarForces() {
+            if (!carBody) return;
+            
+            const isBoostActive = keyState[' '] || keyState['Space'];
+            const currentEnginePower = isBoostActive ? carPhysics.boostPower : carPhysics.enginePower;
+            
+            if (isBoostActive) {
+                boostIndicator.style.display = 'block';
+            } else {
+                boostIndicator.style.display = 'none';
+            }
+            
+            // Get car forward direction
+            const forward = new CANNON.Vec3(0, 0, -1);
+            carBody.quaternion.vmult(forward, forward);
+            
+            // Engine force
+            let engineForce = 0;
+            if (keyState['ArrowUp']) {
+                engineForce = currentEnginePower * 0.001;
+            } else if (keyState['ArrowDown']) {
+                engineForce = -carPhysics.enginePower * 0.0005;
+            }
+            
+            // Apply force to car body
+            if (engineForce !== 0) {
+                const force = new CANNON.Vec3(
+                    forward.x * engineForce,
+                    0,
+                    forward.z * engineForce
+                );
+                carBody.applyImpulse(force, carBody.position);
+            }
+            
+            // Steering torque
+            let torque = 0;
+            if (keyState['ArrowLeft']) {
+                torque = 500;
+            } else if (keyState['ArrowRight']) {
+                torque = -500;
+            }
+            
+            if (torque !== 0) {
+                const torqueVector = new CANNON.Vec3(0, torque, 0);
+                carBody.applyTorqueImpulse(torqueVector);
+            }
+            
+            // Apply drag
+            const velocity = carBody.velocity;
+            const speed = velocity.length();
+            const dragForce = speed * speed * 0.01;
+            
+            if (speed > 0.1) {
+                const drag = velocity.clone();
+                drag.normalize();
+                drag.scale(-dragForce);
+                carBody.applyImpulse(drag, carBody.position);
+            }
+            
+            // Update speed indicator
+            const speedKmh = Math.round(speed * 20); // Adjusted scale
+            speedIndicator.textContent = `速度: ${speedKmh} km/h`;
+        }
+        
+        // Camera system
+        function updateCamera() {
+            if (!car) return;
+            
+            const cameraOffset = new THREE.Vector3(15, 20, 15);
+            const targetCameraPosition = car.position.clone().add(cameraOffset);
+            
+            camera.position.lerp(targetCameraPosition, 0.08);
+            camera.lookAt(car.position);
+        }
+        
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Animation loop with Cannon.js physics
+        let frameCount = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Apply input forces to car
+            applyCarForces();
+            
+            // Update physics simulation
+            updatePhysics();
+            
+            // Update camera
+            updateCamera();
+            
+            // Update particle effects and collectibles
+            updateDriftParticles();
+            updateCollectibleItems();
+            checkItemCollection();
+            
+            // デバッグ情報を10フレームに1回更新（6fps）
+            frameCount++;
+            if (frameCount % 10 === 0) {
+                updateDebugInfo();
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+    </script>
+</body>
+</html>
