@@ -420,12 +420,21 @@
 
     <!-- モジュラーJavaScript -->
     <script type="module">
-        // config.jsのインポートテスト
+        // モジュールのインポート
         import * as CONFIG from './js/config.js';
+        import { SceneManager } from './js/scene.js';
+        import { PhysicsManager } from './js/physics.js';
+        import { InputManager } from './js/input.js';
+        import { UIManager } from './js/ui.js';
         
         // グローバル変数
-        let scene, camera, renderer;
         let selectedCar = '';
+        
+        // マネージャーのインスタンス
+        let sceneManager;
+        let physicsManager;
+        let inputManager;
+        let uiManager;
         
         // 3Dモデルを管理するクラス
         class CarModelViewer {
@@ -599,78 +608,107 @@
             });
         });
         
-        // メインの3Dシーン初期化（仮実装）
+        // メインの3Dシーン初期化
         function initMainScene() {
-            // Three.jsの基本セットアップ
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb); // 空色
-            scene.fog = new THREE.Fog(0x87ceeb, 10, 200); // フォグを追加
+            // マネージャーの初期化
+            sceneManager = new SceneManager();
+            physicsManager = new PhysicsManager();
+            inputManager = new InputManager();
+            uiManager = new UIManager();
             
-            // カメラ
-            camera = new THREE.PerspectiveCamera(
-                CONFIG.CAMERA.fov,
-                window.innerWidth / window.innerHeight,
-                CONFIG.CAMERA.near,
-                CONFIG.CAMERA.far
-            );
-            // カメラ位置を高く、遠くに設定
-            camera.position.set(0, 10, 20);
-            camera.lookAt(0, 0, 0);
+            // 各マネージャーを初期化
+            sceneManager.init();
+            physicsManager.init();
+            inputManager.init();
+            uiManager.init();
             
-            // レンダラー
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            document.body.appendChild(renderer.domElement);
+            // UIの表示設定
+            uiManager.showInstructions(true);
+            uiManager.showLoading(false);
             
-            // ライト
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
+            // 物理世界に地面を追加
+            const groundBody = physicsManager.createGroundBody(200, 200);
             
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(10, 20, 5);
-            directionalLight.castShadow = true;
-            directionalLight.shadow.camera.left = -50;
-            directionalLight.shadow.camera.right = 50;
-            directionalLight.shadow.camera.top = 50;
-            directionalLight.shadow.camera.bottom = -50;
-            scene.add(directionalLight);
-            
-            // 地面（仮）
+            // Three.jsの地面メッシュ
             const groundGeometry = new THREE.PlaneGeometry(200, 200);
             const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x3c8f3c });
             const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
             groundMesh.rotation.x = -Math.PI / 2;
             groundMesh.receiveShadow = true;
-            scene.add(groundMesh);
+            sceneManager.scene.add(groundMesh);
             
-            // グリッドヘルパーを追加（地面の上に表示）
+            // グリッドヘルパー
             const gridHelper = new THREE.GridHelper(100, 50, 0x000000, 0x000000);
-            gridHelper.position.y = 0.01; // 地面の少し上に表示
-            scene.add(gridHelper);
+            gridHelper.position.y = 0.01;
+            sceneManager.scene.add(gridHelper);
             
-            // テスト用の箱を追加（車両の代わり）
-            const boxGeometry = new THREE.BoxGeometry(4, 2, 8);
+            // テスト用の物理ボックス
+            const boxSize = { x: 4, y: 2, z: 8 };
+            const boxBody = physicsManager.createBoxBody(boxSize, 170, { x: 0, y: 5, z: 0 });
+            
+            // Three.jsのボックスメッシュ
+            const boxGeometry = new THREE.BoxGeometry(boxSize.x, boxSize.y, boxSize.z);
             const boxMaterial = new THREE.MeshPhongMaterial({ color: 0x0066cc });
             const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-            boxMesh.position.y = 1;
             boxMesh.castShadow = true;
-            scene.add(boxMesh);
+            sceneManager.scene.add(boxMesh);
+            
+            // 入力コールバックの設定
+            inputManager.setCallback('onReset', () => {
+                // リセット処理
+                boxBody.position.set(0, 5, 0);
+                boxBody.velocity.set(0, 0, 0);
+                boxBody.angularVelocity.set(0, 0, 0);
+                boxBody.quaternion.set(0, 0, 0, 1);
+                uiManager.showMessage('車両をリセットしました');
+            });
+            
+            inputManager.setCallback('onDebugToggle', () => {
+                // デバッグ表示切替
+                const debugMode = !physicsManager.debugMode;
+                physicsManager.setDebugMode(debugMode, sceneManager.scene);
+                uiManager.showDebugInfo(debugMode);
+            });
+            
+            inputManager.setCallback('onHelpToggle', () => {
+                // ヘルプ表示切替
+                const helpVisible = uiManager.elements.instructions.style.display === 'block';
+                uiManager.showInstructions(!helpVisible);
+            });
             
             // アニメーションループ
+            let lastTime = performance.now();
             function animate() {
                 requestAnimationFrame(animate);
-                renderer.render(scene, camera);
+                
+                const currentTime = performance.now();
+                const deltaTime = (currentTime - lastTime) / 1000;
+                lastTime = currentTime;
+                
+                // 物理シミュレーション更新
+                physicsManager.update(deltaTime);
+                
+                // メッシュと物理ボディの同期
+                physicsManager.syncMeshWithBody(boxMesh, boxBody);
+                
+                // UI更新
+                const speed = boxBody.velocity.length();
+                uiManager.updateSpeed(speed);
+                
+                // デバッグ情報更新
+                uiManager.updateDebugInfo({
+                    position: boxBody.position,
+                    speed: speed,
+                    fps: 1 / deltaTime,
+                    physics: {
+                        bodies: physicsManager.world.bodies.length
+                    }
+                });
+                
+                // レンダリング
+                sceneManager.render();
             }
             animate();
-            
-            // ウィンドウリサイズ対応
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
         }
     </script>
 </body>
