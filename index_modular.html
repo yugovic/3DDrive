@@ -386,8 +386,8 @@
 
     <div id="instructions" style="display: none;">
         操作方法:<br>
-        S / ↓: アクセル（前進）<br>
-        W / ↑: ブレーキ / バック<br>
+        W / ↑: アクセル（前進）<br>
+        S / ↓: ブレーキ / バック<br>
         A / ←: 左に曲がる<br>
         D / →: 右に曲がる<br>
         Q: 車高アップ<br>
@@ -458,40 +458,64 @@
             }
             
             init() {
-                // シーンの設定
-                this.scene = new THREE.Scene();
-                this.scene.background = null;
-                
-                // カメラの設定
-                this.camera = new THREE.PerspectiveCamera(45, this.container.clientWidth / this.container.clientHeight, 0.1, 1000);
-                this.camera.position.set(0, 0, 10); // 正面から見る初期位置
-                
-                // レンダラーの設定
-                this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-                this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-                this.container.appendChild(this.renderer.domElement);
-                
-                // ライトの設定
-                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-                this.scene.add(ambientLight);
-                
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                directionalLight.position.set(1, 1, 1);
-                this.scene.add(directionalLight);
-                
-                // 3Dモデルの読み込み
-                this.loadModel();
-                
-                // アニメーション開始
-                this.animate();
+                try {
+                    console.log('[CarModelViewer] 初期化開始:', this.container.id);
+                    
+                    // コンテナのサイズを確認
+                    const width = this.container.clientWidth || 350;
+                    const height = this.container.clientHeight || 250;
+                    console.log('[CarModelViewer] コンテナサイズ:', width, 'x', height);
+                    
+                    // シーンの設定
+                    this.scene = new THREE.Scene();
+                    this.scene.background = null;
+                    
+                    // カメラの設定
+                    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+                    this.camera.position.set(0, 2, 8); // 少し上から見る
+                    
+                    // レンダラーの設定
+                    this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+                    this.renderer.setSize(width, height);
+                    this.container.appendChild(this.renderer.domElement);
+                    
+                    // ライトの設定
+                    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                    this.scene.add(ambientLight);
+                    
+                    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                    directionalLight.position.set(5, 5, 5);
+                    this.scene.add(directionalLight);
+                    
+                    // 3Dモデルの読み込み
+                    this.loadModel();
+                    
+                    // アニメーション開始
+                    this.animate();
+                    
+                    console.log('[CarModelViewer] 初期化完了');
+                } catch (error) {
+                    console.error('[CarModelViewer] 初期化エラー:', error);
+                }
             }
             
             loadModel() {
+                console.log('[CarModelViewer] モデル読み込み開始:', this.modelPath);
+                
+                // GLTFLoaderがグローバルスコープで利用可能か確認
+                if (typeof THREE.GLTFLoader === 'undefined') {
+                    console.error('[CarModelViewer] THREE.GLTFLoaderが見つかりません');
+                    // 代わりにデフォルトのボックスを表示
+                    this.showDefaultBox();
+                    return;
+                }
+                
                 const loader = new THREE.GLTFLoader();
                 
                 loader.load(
                     this.modelPath,
                     (gltf) => {
+                        console.log('[CarModelViewer] モデル読み込み成功:', this.modelPath);
                         this.model = gltf.scene;
                         this.model.scale.set(this.scale, this.scale, this.scale);
                         this.scene.add(this.model);
@@ -513,11 +537,27 @@
                         
                         this.model.rotation.y = Math.PI / 4;
                     },
-                    undefined,
+                    (xhr) => {
+                        console.log('[CarModelViewer] 読み込み進捗:', (xhr.loaded / xhr.total * 100) + '%');
+                    },
                     (error) => {
-                        console.error('Error loading model:', error);
+                        console.error('[CarModelViewer] モデル読み込みエラー:', error);
+                        console.error('[CarModelViewer] パス:', this.modelPath);
+                        // エラー時はデフォルトのボックスを表示
+                        this.showDefaultBox();
                     }
                 );
+            }
+            
+            showDefaultBox() {
+                console.log('[CarModelViewer] デフォルトボックスを表示');
+                const geometry = new THREE.BoxGeometry(2, 1, 3);
+                const material = new THREE.MeshPhongMaterial({ color: 0x0066cc });
+                this.model = new THREE.Mesh(geometry, material);
+                this.scene.add(this.model);
+                
+                this.camera.position.z = 10;
+                this.camera.lookAt(0, 0, 0);
             }
             
             animate() {
@@ -535,77 +575,148 @@
         
         // DOMContentLoadedイベント
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('DOM Content Loaded');
+            console.log('[Main] DOM Content Loaded');
+            console.log('[Main] Three.jsバージョン:', typeof THREE !== 'undefined' ? THREE.REVISION : '未読み込み');
+            console.log('[Main] GLTFLoader:', typeof THREE !== 'undefined' && typeof THREE.GLTFLoader !== 'undefined' ? '利用可能' : '利用不可');
             
             const carSelect = document.getElementById('car-select');
             const startButton = document.getElementById('start-button');
             const carSelectionModal = document.getElementById('car-selection-modal');
             
             // Swiperの初期化
-            const swiper = new Swiper('.swiper', {
-                effect: 'coverflow',
-                grabCursor: true,
-                centeredSlides: true,
-                slidesPerView: 'auto',
-                coverflowEffect: {
-                    rotate: 0,
-                    stretch: 0,
-                    depth: 100,
-                    modifier: 2,
-                    slideShadows: true,
-                },
-                pagination: {
-                    el: '.swiper-pagination',
-                    clickable: true,
-                },
-                navigation: {
-                    nextEl: '.swiper-button-next',
-                    prevEl: '.swiper-button-prev',
-                },
-                on: {
-                    init: function () {
-                        // 初期化時に最初のスライドを選択状態にする
-                        const firstSlide = this.slides[0];
-                        const firstOption = firstSlide.querySelector('.car-option');
-                        const firstValue = firstOption.getAttribute('data-value');
-                        
-                        firstOption.classList.add('selected');
-                        carSelect.value = firstValue;
-                        selectedCar = firstValue;
-                        startButton.disabled = false;
+            console.log('[Main] Swiper初期化開始');
+            
+            // Swiperが存在するか確認
+            if (typeof Swiper === 'undefined') {
+                console.error('[Main] Swiperが見つかりません。ライブラリが読み込まれていません。');
+                // フォールバック: 最初の車を選択
+                selectedCar = 'rx7';
+                carSelect.value = selectedCar;
+                startButton.disabled = false;
+                return;
+            }
+            
+            try {
+                const swiper = new Swiper('.swiper', {
+                    effect: 'coverflow',
+                    grabCursor: true,
+                    centeredSlides: true,
+                    slidesPerView: 'auto',
+                    coverflowEffect: {
+                        rotate: 0,
+                        stretch: 0,
+                        depth: 100,
+                        modifier: 2,
+                        slideShadows: true,
                     },
-                    slideChange: function () {
-                        const activeSlide = this.slides[this.activeIndex];
-                        const carOption = activeSlide.querySelector('.car-option');
-                        const value = carOption.getAttribute('data-value');
-                        
-                        // 選択状態を更新
-                        document.querySelectorAll('.car-option').forEach(opt => {
-                            opt.classList.remove('selected');
-                        });
-                        carOption.classList.add('selected');
-                        
-                        // セレクトボックスの値を更新
-                        carSelect.value = value;
-                        selectedCar = value;
-                        
-                        // スタートボタンを有効化
-                        startButton.disabled = false;
+                    pagination: {
+                        el: '.swiper-pagination',
+                        clickable: true,
+                    },
+                    navigation: {
+                        nextEl: '.swiper-button-next',
+                        prevEl: '.swiper-button-prev',
+                    },
+                    on: {
+                        init: function () {
+                            console.log('[Swiper] 初期化完了');
+                            // 初期化時に最初のスライドを選択状態にする
+                            if (this.slides && this.slides[0]) {
+                                const firstSlide = this.slides[0];
+                                const firstOption = firstSlide.querySelector('.car-option');
+                                if (firstOption) {
+                                    const firstValue = firstOption.getAttribute('data-value');
+                                    
+                                    firstOption.classList.add('selected');
+                                    carSelect.value = firstValue;
+                                    selectedCar = firstValue;
+                                    startButton.disabled = false;
+                                    console.log('[Swiper] 最初の車を選択:', firstValue);
+                                } else {
+                                    console.error('[Swiper] car-option要素が見つかりません');
+                                }
+                            } else {
+                                console.error('[Swiper] スライドが見つかりません');
+                            }
+                        },
+                        slideChange: function () {
+                            console.log('[Swiper] スライド変更:', this.activeIndex);
+                            if (this.slides && this.slides[this.activeIndex]) {
+                                const activeSlide = this.slides[this.activeIndex];
+                                const carOption = activeSlide.querySelector('.car-option');
+                                if (carOption) {
+                                    const value = carOption.getAttribute('data-value');
+                                    
+                                    // 選択状態を更新
+                                    document.querySelectorAll('.car-option').forEach(opt => {
+                                        opt.classList.remove('selected');
+                                    });
+                                    carOption.classList.add('selected');
+                                    
+                                    // セレクトボックスの値を更新
+                                    carSelect.value = value;
+                                    selectedCar = value;
+                                    
+                                    // スタートボタンを有効化
+                                    startButton.disabled = false;
+                                    console.log('[Swiper] 車を選択:', value);
+                                }
+                            }
+                        }
                     }
-                }
-            });
+                });
+                console.log('[Main] Swiper初期化成功');
+            } catch (error) {
+                console.error('[Main] Swiper初期化エラー:', error);
+                // フォールバック
+                selectedCar = 'rx7';
+                carSelect.value = selectedCar;
+                startButton.disabled = false;
+            }
             
             // 車種選択画面の3Dモデル表示（2倍のサイズ）
-            const rx7Viewer = new CarModelViewer('rx7-model', CONFIG.CAR_MODELS.rx7.fallbackUrl || CONFIG.CAR_MODELS.rx7.url, 2);
-            const r360Viewer = new CarModelViewer('r360-model', CONFIG.CAR_MODELS.r360.url, 2);
+            console.log('[Main] 車種選択画面初期化');
+            console.log('[Main] RX-7モデルパス:', CONFIG.CAR_MODELS.rx7.fallbackUrl || CONFIG.CAR_MODELS.rx7.url);
+            console.log('[Main] R360モデルパス:', CONFIG.CAR_MODELS.r360.url);
+            
+            // エラーハンドリングを追加
+            try {
+                const rx7Viewer = new CarModelViewer('rx7-model', CONFIG.CAR_MODELS.rx7.fallbackUrl || CONFIG.CAR_MODELS.rx7.url, 2);
+                const r360Viewer = new CarModelViewer('r360-model', CONFIG.CAR_MODELS.r360.url, 2);
+                
+                // ビューアーをグローバルに保存（後でdisposeするため）
+                window.rx7Viewer = rx7Viewer;
+                window.r360Viewer = r360Viewer;
+            } catch (error) {
+                console.error('[Main] CarModelViewer初期化エラー:', error);
+            }
+            
+            // 車種オプションのクリックイベントを追加
+            document.querySelectorAll('.car-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    console.log('[Main] 車種オプションがクリックされました:', this.getAttribute('data-value'));
+                    
+                    // 選択状態を更新
+                    document.querySelectorAll('.car-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    this.classList.add('selected');
+                    
+                    // 選択された車種を設定
+                    const value = this.getAttribute('data-value');
+                    carSelect.value = value;
+                    selectedCar = value;
+                    startButton.disabled = false;
+                });
+            });
             
             // スタートボタンのクリックイベント
             startButton.addEventListener('click', () => {
                 console.log('Start button clicked, selected car:', selectedCar);
                 
                 // モデルビューアーのクリーンアップ
-                rx7Viewer.dispose();
-                r360Viewer.dispose();
+                if (window.rx7Viewer) window.rx7Viewer.dispose();
+                if (window.r360Viewer) window.r360Viewer.dispose();
                 
                 // モーダルを非表示
                 carSelectionModal.style.display = 'none';

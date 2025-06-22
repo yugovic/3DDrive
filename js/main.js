@@ -176,8 +176,8 @@ export class Game {
         this.vehicleManager.update(inputActions, deltaTime);
         this.vehicleManager.syncMeshWithBody();
 
-        // 地形更新
-        this.terrainManager.update(deltaTime);
+        // 地形更新（車両ボディを渡す）
+        this.terrainManager.update(deltaTime, this.vehicleManager.chassisBody);
 
         // アイテム更新
         const vehiclePosition = this.vehicleManager.getPosition();

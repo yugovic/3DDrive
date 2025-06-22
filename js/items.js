@@ -58,17 +58,20 @@ export class ItemManager {
         // ランダムなアイテムタイプを選択
         const itemType = CONFIG.ITEMS.types[Math.floor(Math.random() * CONFIG.ITEMS.types.length)];
         
-        // アイテムのメッシュを作成
+        // アイテムのメッシュを作成（透明な球）
         const material = new THREE.MeshPhongMaterial({
             color: new THREE.Color().setHSL(Math.random(), 0.8, 0.6),
             emissive: new THREE.Color().setHSL(Math.random(), 0.8, 0.3),
-            emissiveIntensity: 0.3
+            emissiveIntensity: 0.3,
+            transparent: true,
+            opacity: 0,  // 完全に透明
+            visible: false  // 非表示にする
         });
         
         const mesh = new THREE.Mesh(this.itemGeometry, material);
         mesh.position.copy(position);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        mesh.castShadow = false;  // 透明なので影も不要
+        mesh.receiveShadow = false;
         
         // 絵文字を表示するためのスプライト
         const canvas = document.createElement('canvas');
@@ -90,7 +93,7 @@ export class ItemManager {
         sprite.position.copy(position);
         sprite.position.y += 1;
         
-        // シーンに追加
+        // シーンに追加（メッシュは非表示だが、当たり判定用に追加）
         this.sceneManager.scene.add(mesh);
         this.sceneManager.scene.add(sprite);
         

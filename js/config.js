@@ -15,23 +15,23 @@ export const VEHICLE = {
         radius: 0.33,
         thickness: 0.25,
         axisPosition: 1.3 * 0.42, // 車幅の42%位置（新しい車幅に合わせて調整）
-        suspensionStiffness: 80,
-        suspensionDamping: 13,
-        suspensionCompression: 8.2,
-        suspensionRestLength: 0.35,  // サスペンションの休止長を適切に設定（車高調整）
-        frictionSlip: 50,
+        suspensionStiffness: 60,      // 柔らかくして地形追従性を向上（80→60）
+        suspensionDamping: 10,        // ダンピングも調整（13→10）
+        suspensionCompression: 6.0,   // 圧縮時の減衰を調整（8.2→6.0）
+        suspensionRestLength: 0.45,   // サスペンションを長くして車高アップ（0.35→0.45）
+        frictionSlip: 40,             // グリップを強化（50→40）
         rollInfluence: 0.01,
-        maxSuspensionTravel: 0.3,    // 最大サスペンショントラベルも調整
-        maxSuspensionForce: 200000
+        maxSuspensionTravel: 0.5,     // 最大トラベルを増加（0.3→0.5）
+        maxSuspensionForce: 250000    // 最大力も増加（200000→250000）
     },
     
     // エンジン・ブレーキ設定
     engine: {
-        baseForce: 1500, // N（通常時）
-        turboMultiplier: 3000 / 1500, // ターボ時の倍率（2倍）
+        baseForce: 3000, // N（通常時）- 2倍に増加
+        turboMultiplier: 6000 / 3000, // ターボ時の倍率（2倍）
         brakeForce: 50, // ブレーキ力を強化（20→50）
         maxSpeed: 25, // m/s (90 km/h) - より現実的な最高速度
-        reverseMultiplier: 1.0 // バック時の力の倍率（前進と同じ1500N）
+        reverseMultiplier: 1.0 // バック時の力の倍率（前進と同じ3000N）
     },
     
     // ステアリング設定
@@ -52,10 +52,13 @@ export const VEHICLE = {
     // 安定化設定
     stabilization: {
         verticalAxis: { x: 0, y: 1, z: 0 },
-        rollCorrectionStrength: 25,
-        rollCorrectionSpeed: 0.1,
-        pitchCorrectionStrength: 10,
-        pitchCorrectionSpeed: 0.03
+        rollCorrectionStrength: 50,      // 横転補正を強化（25→50）
+        rollCorrectionSpeed: 0.2,        // 補正速度を上げる（0.1→0.2）
+        pitchCorrectionStrength: 20,     // 前後傾き補正も強化（10→20）
+        pitchCorrectionSpeed: 0.05,      // 補正速度を上げる（0.03→0.05）
+        maxRollAngle: 0.5,               // 最大横転角度（ラジアン）約28度
+        emergencyRollThreshold: 0.4,     // 緊急補正開始角度（約23度）
+        emergencyRollStrength: 100       // 緊急時の補正力
     }
 };
 
@@ -138,10 +141,10 @@ export const UI = {
 
 // キーマッピング
 export const KEY_MAPPINGS = {
-    "KeyW": "braking",        // W = 後退/ブレーキ
-    "ArrowUp": "braking",     // ↑ = 後退/ブレーキ
-    "KeyS": "acceleration",   // S = 前進
-    "ArrowDown": "acceleration", // ↓ = 前進
+    "KeyW": "acceleration",   // W = 前進
+    "ArrowUp": "acceleration", // ↑ = 前進
+    "KeyS": "braking",        // S = 後退/ブレーキ
+    "ArrowDown": "braking",   // ↓ = 後退/ブレーキ
     "KeyA": "left",
     "ArrowLeft": "left",
     "KeyD": "right",
@@ -182,6 +185,6 @@ export const DEFAULTS = {
     carModel: 'rx7',
     debugMode: true,
     initialPosition: { x: 0, y: 2.1, z: 10 },  // 初期位置を調整（10cm上げた）
-    // Y軸周りに-90度回転させて、Z軸の負方向を前にする
-    initialQuaternion: { x: 0, y: -0.707, z: 0, w: 0.707 }
+    // Y軸周りに90度回転させて、Z軸の正方向を前にする（180度回転）
+    initialQuaternion: { x: 0, y: 0.707, z: 0, w: 0.707 }
 };
