@@ -532,7 +532,9 @@ export class TerrainManager {
         const platformMesh = new THREE.Mesh(platformGeometry, platformMaterial);
         // 床板の上面が地面より少し上になるように配置（Z-fighting回避）
         const zFightingOffset = 0.01; // 1cm上にオフセット
-        platformMesh.position.set(position.x, -platformSize.height/2 + zFightingOffset, position.z);
+        // メッシュの初期位置（Y座標はボックスの中心）
+        const meshInitialY = -platformSize.height/2 + zFightingOffset;
+        platformMesh.position.set(position.x, meshInitialY, position.z);
         platformMesh.castShadow = true;
         platformMesh.receiveShadow = true;
         // レンダリング順序を設定（地面より後に描画）
@@ -560,21 +562,29 @@ export class TerrainManager {
         const platformBody = new CANNON.Body({
             mass: 0, // キネマティック（手動で動かす）
             shape: platformShape,
-            type: CANNON.Body.KINEMATIC
+            type: CANNON.Body.KINEMATIC,
+            material: this.physicsManager.materials.elevator || this.physicsManager.materials.ground, // エレベーター専用マテリアル
+            collisionResponse: true, // 衝突応答を有効化（完全な剛体）
+            fixedRotation: true // 回転を固定
         });
-        platformBody.position.copy(platformMesh.position);
+        // コリジョンボディの位置をメッシュと同じに設定
+        platformBody.position.set(position.x, meshInitialY, position.z);
+        // 初期速度を設定
+        platformBody.velocity.set(0, 0, 0);
+        platformBody.angularVelocity.set(0, 0, 0);
         this.physicsManager.addBody(platformBody);
         
         // エレベーターデータを保存
         this.elevators.push({
             mesh: platformMesh,
             body: platformBody,
-            minY: -platformSize.height/2 + zFightingOffset, // 床板の中心位置（上面が地面レベルより少し上）
-            maxY: maxHeight - platformSize.height/2 + zFightingOffset, // 最高位置も調整
-            speed: 2, // m/s
+            minY: meshInitialY, // メッシュの初期位置を使用
+            maxY: maxHeight + meshInitialY, // 最高位置も同じオフセットを適用
+            speed: 0.5, // m/s (さらに速度を遅くして安定性を向上)
             direction: 1,
             waitTime: 2, // 上下での待機時間
-            waitTimer: 0
+            waitTimer: 0,
+            platformHeight: platformSize.height // プラットフォームの高さを保存
         });
     }
     
@@ -808,23 +818,54 @@ export class TerrainManager {
             // 待機時間の処理
             if (elevator.waitTimer > 0) {
                 elevator.waitTimer -= deltaTime;
+                // 待機中は速度を0に
+                elevator.body.velocity.set(0, 0, 0);
                 return;
             }
             
-            // 移動
+            // 移動量と速度の計算
             const moveAmount = elevator.speed * elevator.direction * deltaTime;
+            const velocityY = elevator.speed * elevator.direction;
+            
+            // 位置を更新（メッシュとコリジョンを完全に同期）
             elevator.mesh.position.y += moveAmount;
-            elevator.body.position.y += moveAmount;
+            elevator.body.position.y = elevator.mesh.position.y; // メッシュの位置を確実にコピー
+            
+            // KINEMATICボディの速度を設定（物理エンジンに速度情報を伝える）
+            // 注：車両への加速度付与は行わない。物理エンジンが自動的に処理する
+            elevator.body.velocity.set(0, velocityY, 0);
+            
+            // デバッグ情報（オプション）
+            if (Math.abs(moveAmount) > 0.001 && vehicleBody) {
+                const dx = vehicleBody.position.x - elevator.body.position.x;
+                const dz = vehicleBody.position.z - elevator.body.position.z;
+                const horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (horizontalDistance < 3) { // エレベーターの範囲内
+                    const vehicleBottomY = vehicleBody.position.y - 0.5; // 車両の底面（概算）
+                    // エレベーターの上面 = ボディのY位置 + 高さの半分
+                    const platformTopY = elevator.body.position.y + (elevator.platformHeight ? elevator.platformHeight / 2 : 0.25);
+                    const yDiff = vehicleBottomY - platformTopY;
+                    
+                    // 車両が浮き上がっている場合に警告
+                    if (yDiff > 0.1) {
+                        console.warn(`[エレベーター] 車両が浮き上がっています: ${yDiff.toFixed(3)}m`);
+                        console.warn(`[エレベーター] メッシュY: ${elevator.mesh.position.y.toFixed(3)}m, ボディY: ${elevator.body.position.y.toFixed(3)}m`);
+                    }
+                }
+            }
             
             // 境界チェック
             if (elevator.mesh.position.y >= elevator.maxY) {
                 elevator.mesh.position.y = elevator.maxY;
-                elevator.body.position.y = elevator.maxY;
+                elevator.body.position.y = elevator.mesh.position.y; // メッシュの位置を確実にコピー
+                elevator.body.velocity.set(0, 0, 0); // 停止時は速度を0に
                 elevator.direction = -1;
                 elevator.waitTimer = elevator.waitTime;
             } else if (elevator.mesh.position.y <= elevator.minY) {
                 elevator.mesh.position.y = elevator.minY;
-                elevator.body.position.y = elevator.minY;
+                elevator.body.position.y = elevator.mesh.position.y; // メッシュの位置を確実にコピー
+                elevator.body.velocity.set(0, 0, 0); // 停止時は速度を0に
                 elevator.direction = 1;
                 elevator.waitTimer = elevator.waitTime;
             }

@@ -82,6 +82,11 @@ export const PHYSICS = {
         restitution: 0.3,
         contactEquationStiffness: 1e8,
         contactEquationRelaxation: 3
+    },
+    // エレベーター用マテリアル
+    elevatorMaterial: {
+        friction: 1.0, // 高い摩擦で滑りにくく
+        restitution: 0.0 // 反発しない
     }
 };
 

@@ -170,9 +170,12 @@ export class PhysicsManager {
         this.world.broadphase.axisIndex = 0;
         
         // ソルバーの設定
-        this.world.solver.iterations = 10;
+        this.world.solver.iterations = 20; // イテレーション数を増やして精度向上
+        this.world.solver.tolerance = 0.001; // ソルバーの許容誤差
         this.world.defaultContactMaterial.friction = CONFIG.PHYSICS.defaultMaterial.friction;
         this.world.defaultContactMaterial.restitution = CONFIG.PHYSICS.defaultMaterial.restitution;
+        this.world.defaultContactMaterial.contactEquationStiffness = 1e8; // 接触剛性
+        this.world.defaultContactMaterial.contactEquationRelaxation = 3; // 接触緩和
         
         // マテリアルの作成
         this.createMaterials();
@@ -187,6 +190,11 @@ export class PhysicsManager {
         // 車輪マテリアル
         this.materials.wheel = new CANNON.Material('wheel');
         
+        // エレベーターマテリアル
+        this.materials.elevator = new CANNON.Material('elevator');
+        this.materials.elevator.friction = CONFIG.PHYSICS.elevatorMaterial.friction;
+        this.materials.elevator.restitution = CONFIG.PHYSICS.elevatorMaterial.restitution;
+        
         // コンタクトマテリアル（車輪と地面の接触）
         const wheelGroundContact = new CANNON.ContactMaterial(
             this.materials.wheel,
@@ -199,12 +207,28 @@ export class PhysicsManager {
             }
         );
         this.world.addContactMaterial(wheelGroundContact);
+        
+        // コンタクトマテリアル（車輪とエレベーターの接触）
+        const wheelElevatorContact = new CANNON.ContactMaterial(
+            this.materials.wheel,
+            this.materials.elevator,
+            {
+                friction: 1.0, // 高い摩擦で滑りにくく
+                restitution: 0.0, // 反発なし
+                contactEquationStiffness: 1e9, // より高い剛性
+                contactEquationRelaxation: 2 // より速い収束
+            }
+        );
+        this.world.addContactMaterial(wheelElevatorContact);
     }
 
     update(deltaTime) {
         if (this.world) {
             try {
-                this.world.step(deltaTime);
+                // 固定タイムステップで物理シミュレーションを実行
+                const fixedTimeStep = 1/60; // 60Hz
+                const maxSubSteps = 3; // 最大サブステップ数
+                this.world.step(fixedTimeStep, deltaTime, maxSubSteps);
             } catch (error) {
                 console.error('Cannon.js stepエラー:', error);
                 console.error('エラースタック:', error.stack);
