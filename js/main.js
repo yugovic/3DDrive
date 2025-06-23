@@ -53,6 +53,7 @@ export class Game {
             // 地形マネージャーの作成と初期化
             console.log('初期化開始: TerrainManager');
             this.terrainManager = new TerrainManager(this.physicsManager, this.sceneManager);
+            this.terrainManager.setUIManager(this.uiManager); // UIマネージャーを設定
             this.terrainManager.createTerrain();
 
             // 車両マネージャーの作成と初期化

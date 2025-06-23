@@ -194,6 +194,77 @@ export class UIManager {
         }, duration);
     }
 
+    // エレベーター安全停止警告
+    showElevatorSafetyWarning(show = true) {
+        const warningId = 'elevator-safety-warning';
+        let warningDiv = document.getElementById(warningId);
+        
+        if (show && !warningDiv) {
+            // 警告メッセージを作成
+            warningDiv = document.createElement('div');
+            warningDiv.id = warningId;
+            warningDiv.style.cssText = `
+                position: fixed;
+                bottom: 120px;
+                left: 50%;
+                transform: translateX(-50%);
+                color: #000;
+                padding: 20px 40px;
+                border-radius: 10px;
+                font-size: 28px;
+                font-weight: bold;
+                font-family: sans-serif;
+                z-index: 1001;
+                border: 5px solid rgba(0, 0, 0, 0.6);
+                box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+                animation: safetyPulse 1s ease-in-out infinite;
+                backdrop-filter: blur(3px);
+            `;
+            
+            // 黄色と黒のストライプボーダーを作成（透過）
+            warningDiv.style.backgroundImage = `
+                repeating-linear-gradient(
+                    45deg,
+                    rgba(255, 204, 0, 0.7),
+                    rgba(255, 204, 0, 0.7) 20px,
+                    rgba(0, 0, 0, 0.7) 20px,
+                    rgba(0, 0, 0, 0.7) 40px
+                )
+            `;
+            
+            // 内部コンテンツ用のコンテナ
+            const contentDiv = document.createElement('div');
+            contentDiv.style.cssText = `
+                background-color: rgba(255, 255, 255, 0.7);
+                padding: 15px 25px;
+                border-radius: 5px;
+                border: 2px solid rgba(0, 0, 0, 0.6);
+                text-shadow: 2px 2px 4px rgba(255, 255, 255, 0.9);
+            `;
+            contentDiv.textContent = '⚠️ 安全停止中 ⚠️';
+            
+            warningDiv.appendChild(contentDiv);
+            document.body.appendChild(warningDiv);
+            
+            // アニメーションスタイルを追加（まだ存在しない場合）
+            if (!document.getElementById('elevator-safety-animations')) {
+                const style = document.createElement('style');
+                style.id = 'elevator-safety-animations';
+                style.textContent = `
+                    @keyframes safetyPulse {
+                        0% { transform: translateX(-50%) scale(1); }
+                        50% { transform: translateX(-50%) scale(1.05); }
+                        100% { transform: translateX(-50%) scale(1); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        } else if (!show && warningDiv) {
+            // 警告メッセージを削除
+            warningDiv.remove();
+        }
+    }
+
     dispose() {
         // デバッグパネルの削除
         if (this.elements.debugInfo && this.elements.debugInfo.parentNode) {
@@ -203,6 +274,12 @@ export class UIManager {
         // タイムアウトのクリア
         if (this.turboTimeout) {
             clearTimeout(this.turboTimeout);
+        }
+        
+        // エレベーター安全停止警告を削除
+        const warningDiv = document.getElementById('elevator-safety-warning');
+        if (warningDiv) {
+            warningDiv.remove();
         }
     }
 }

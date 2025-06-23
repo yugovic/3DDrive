@@ -5,6 +5,7 @@ export class TerrainManager {
     constructor(physicsManager, sceneManager) {
         this.physicsManager = physicsManager;
         this.sceneManager = sceneManager;
+        this.uiManager = null; // UIマネージャーへの参照（後で設定）
         
         this.groundMesh = null;
         this.groundBody = null;
@@ -20,6 +21,11 @@ export class TerrainManager {
         
         this.slopeHeight = CONFIG.SLOPE.defaultHeight;
         this.slopeAngle = Math.atan2(this.slopeHeight, CONFIG.SLOPE.length);
+    }
+
+    // UIマネージャーを設定
+    setUIManager(uiManager) {
+        this.uiManager = uiManager;
     }
 
     createTerrain() {
@@ -574,17 +580,27 @@ export class TerrainManager {
         platformBody.angularVelocity.set(0, 0, 0);
         this.physicsManager.addBody(platformBody);
         
+        // 安全センサーゾーンのパラメータのみ保存（物理ボディは作成しない）
+        const sensorHeight = 3.0; // センサーゾーンの高さ
+        const sensorWidth = platformSize.width + 1.0; // エレベーターより少し広い範囲
+        const sensorDepth = platformSize.depth + 1.0;
+        
         // エレベーターデータを保存
         this.elevators.push({
             mesh: platformMesh,
             body: platformBody,
+            position: position, // エレベーターの基準位置
             minY: meshInitialY, // メッシュの初期位置を使用
             maxY: maxHeight + meshInitialY, // 最高位置も同じオフセットを適用
             speed: 0.5, // m/s (さらに速度を遅くして安定性を向上)
             direction: 1,
             waitTime: 2, // 上下での待機時間
             waitTimer: 0,
-            platformHeight: platformSize.height // プラットフォームの高さを保存
+            platformHeight: platformSize.height, // プラットフォームの高さを保存
+            safetyStop: false, // 安全停止状態
+            sensorHeight: sensorHeight, // センサーゾーンの高さ
+            sensorWidth: sensorWidth, // センサーゾーンの幅
+            sensorDepth: sensorDepth // センサーゾーンの奥行き
         });
     }
     
@@ -790,6 +806,44 @@ export class TerrainManager {
         });
     }
     
+    checkElevatorSafety(elevator, vehicleBody) {
+        if (!vehicleBody || elevator.direction >= 0) {
+            // 車両がないか、エレベーターが上昇中の場合はチェック不要
+            return false;
+        }
+        
+        // エレベーターの現在位置
+        const elevatorY = elevator.body.position.y;
+        const elevatorBottomY = elevatorY - elevator.platformHeight/2;
+        
+        // 車両の位置
+        const vehiclePos = vehicleBody.position;
+        
+        // 水平距離の計算（エレベーターの中心からの距離）
+        const dx = Math.abs(vehiclePos.x - elevator.position.x);
+        const dz = Math.abs(vehiclePos.z - elevator.position.z);
+        
+        // エレベーターのセンサーゾーン内かチェック（水平方向）
+        const isInHorizontalRange = dx < elevator.sensorWidth/2 && dz < elevator.sensorDepth/2;
+        
+        // 垂直方向のチェック（エレベーター底面の下、センサーゾーン内）
+        const vehicleTopY = vehiclePos.y + 1.0; // 車両の高さを考慮（概算）
+        const sensorBottomY = elevatorBottomY - elevator.sensorHeight;
+        
+        // 車両がセンサーゾーン内にいるか
+        const isInDangerZone = isInHorizontalRange && 
+                              vehicleTopY >= sensorBottomY && 
+                              vehicleTopY <= elevatorBottomY;
+        
+        if (isInDangerZone && !elevator.safetyStop) {
+            console.warn('[エレベーター] 安全停止作動！車両を検出しました。');
+            console.log(`車両位置: X=${vehiclePos.x.toFixed(2)}, Y=${vehiclePos.y.toFixed(2)}, Z=${vehiclePos.z.toFixed(2)}`);
+            console.log(`エレベーター底面Y: ${elevatorBottomY.toFixed(2)}, センサー底Y: ${sensorBottomY.toFixed(2)}`);
+        }
+        
+        return isInDangerZone;
+    }
+    
     checkJumpPads(vehicleBody) {
         this.jumpPads.forEach(pad => {
             if (pad.cooldown > 0) return;
@@ -815,10 +869,35 @@ export class TerrainManager {
     updateGimmicks(deltaTime, vehicleBody) {
         // エレベーターの更新
         this.elevators.forEach(elevator => {
+            // 安全チェック（下降中のみ）
+            if (elevator.direction < 0 && vehicleBody) {
+                const isSafetyNeeded = this.checkElevatorSafety(elevator, vehicleBody);
+                
+                if (isSafetyNeeded) {
+                    elevator.safetyStop = true;
+                    // 警告表示
+                    if (this.uiManager) {
+                        this.uiManager.showElevatorSafetyWarning(true);
+                    }
+                } else if (elevator.safetyStop) {
+                    // 安全停止解除
+                    elevator.safetyStop = false;
+                    if (this.uiManager) {
+                        this.uiManager.showElevatorSafetyWarning(false);
+                    }
+                }
+            }
+            
             // 待機時間の処理
             if (elevator.waitTimer > 0) {
                 elevator.waitTimer -= deltaTime;
                 // 待機中は速度を0に
+                elevator.body.velocity.set(0, 0, 0);
+                return;
+            }
+            
+            // 安全停止中は移動しない
+            if (elevator.safetyStop) {
                 elevator.body.velocity.set(0, 0, 0);
                 return;
             }
