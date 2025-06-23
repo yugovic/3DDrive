@@ -88,8 +88,7 @@ export class Game {
     setupInputCallbacks() {
         // 車両リセット
         this.inputManager.setCallback('onReset', () => {
-            this.vehicleManager.reset();
-            this.uiManager.showMessage('車両をリセットしました');
+            this.resetVehicle('車両をリセットしました');
         });
 
         // デバッグ表示切替
@@ -160,6 +159,12 @@ export class Game {
         });
     }
 
+    // 車両リセット共通関数
+    resetVehicle(message = '車両をリセットしました') {
+        this.vehicleManager.reset();
+        this.uiManager.showMessage(message, CONFIG.GAME.defaultMessageDuration);
+    }
+
     animate() {
         if (!this.isRunning) return;
 
@@ -183,6 +188,12 @@ export class Game {
         // アイテム更新
         const vehiclePosition = this.vehicleManager.getPosition();
         this.itemManager.update(vehiclePosition);
+        
+        // 床下落下チェック
+        if (vehiclePosition && vehiclePosition.y < CONFIG.GAME.respawnThreshold) {
+            console.warn('[ゲーム] 車両が床下に落下しました。リスポーンします。');
+            this.resetVehicle('リスポーンしました');
+        }
 
         // カメラ追従
         if (this.vehicleManager.chassisBody) {

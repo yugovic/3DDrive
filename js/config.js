@@ -185,6 +185,15 @@ export const CAR_MODELS = {
     }
 };
 
+// ゲーム設定
+export const GAME = {
+    respawnThreshold: -10,  // この高さ以下でリスポーン
+    defaultMessageDuration: 2000,  // デフォルトメッセージ表示時間
+    safetyWarningPosition: {
+        bottom: 120  // 画面下部からの距離（すべての通知で統一）
+    }
+};
+
 // デフォルト設定
 export const DEFAULTS = {
     carModel: 'rx7',

@@ -152,10 +152,10 @@ export class UIManager {
     showMessage(message, duration = 3000) {
         const messageDiv = document.createElement('div');
         messageDiv.style.cssText = `
-            position: absolute;
-            top: 50%;
+            position: fixed;
+            bottom: ${CONFIG.GAME.safetyWarningPosition.bottom}px;
             left: 50%;
-            transform: translate(-50%, -50%);
+            transform: translateX(-50%);
             color: white;
             background-color: rgba(0, 0, 0, 0.8);
             padding: 20px 40px;
@@ -174,12 +174,12 @@ export class UIManager {
             style.id = 'ui-animations';
             style.textContent = `
                 @keyframes fadeIn {
-                    from { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
-                    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                    from { opacity: 0; transform: translateX(-50%) scale(0.8); }
+                    to { opacity: 1; transform: translateX(-50%) scale(1); }
                 }
                 @keyframes fadeOut {
-                    from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-                    to { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+                    from { opacity: 1; transform: translateX(-50%) scale(1); }
+                    to { opacity: 0; transform: translateX(-50%) scale(0.8); }
                 }
             `;
             document.head.appendChild(style);
@@ -205,7 +205,7 @@ export class UIManager {
             warningDiv.id = warningId;
             warningDiv.style.cssText = `
                 position: fixed;
-                bottom: 120px;
+                bottom: ${CONFIG.GAME.safetyWarningPosition.bottom}px;
                 left: 50%;
                 transform: translateX(-50%);
                 color: #000;
