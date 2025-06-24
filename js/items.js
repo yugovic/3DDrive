@@ -1,5 +1,6 @@
 // アイテムシステムモジュール
 import * as CONFIG from './config.js';
+import { audioIntegration } from './audio-integration.js';
 
 export class ItemManager {
     constructor(sceneManager, uiManager) {
@@ -141,6 +142,9 @@ export class ItemManager {
         
         // 収集エフェクト
         this.createCollectEffect(item.position);
+        
+        // 収集音を再生
+        audioIntegration.playItemCollect();
         
         // メッシュとスプライトを削除
         this.sceneManager.scene.remove(item.mesh);

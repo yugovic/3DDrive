@@ -64,6 +64,21 @@ export class UIManager {
             this.elements.speedValue.textContent = kmh;
         }
     }
+    
+    updateEngineMode(isAdvanced) {
+        const engineModeElement = document.getElementById('engine-mode');
+        if (engineModeElement) {
+            engineModeElement.textContent = `エンジン: ${isAdvanced ? '高度' : 'シンプル'}`;
+            engineModeElement.style.color = isAdvanced ? '#ff6b6b' : '#aaa';
+        }
+    }
+    
+    updateVehicleName(vehicleName) {
+        const vehicleNameElement = document.getElementById('vehicle-name');
+        if (vehicleNameElement) {
+            vehicleNameElement.textContent = `車種: ${vehicleName}`;
+        }
+    }
 
     showTurbo(active) {
         if (this.elements.turboIndicator) {

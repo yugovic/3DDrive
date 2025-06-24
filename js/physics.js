@@ -1,5 +1,6 @@
 // Cannon.js物理エンジン管理モジュール
 import * as CONFIG from './config.js';
+import { audioIntegration } from './audio-integration.js';
 
 // Cannon.jsデバッグレンダラークラス
 class CannonDebugRenderer {

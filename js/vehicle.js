@@ -1,5 +1,7 @@
 // 車両システムモジュール
 import * as CONFIG from './config.js';
+import { audioIntegration } from './audio-integration.js';
+import { getVehicleSpec, getPhysicsConfig } from './vehicle-specs.js';
 
 export class VehicleManager {
     constructor(physicsManager, sceneManager) {
@@ -21,15 +23,22 @@ export class VehicleManager {
         this.heightOffset = 0; // デバッグ用の高さオフセット
         this.debugClearance = -0.15; // デバッグ用の車高調整値（タイヤを下げて地面に接地）
         this.modelYOffset = -0.2; // 3Dモデルの表示オフセット（コリジョンオフセットと同じ値）
+        this.modelGroundOffset = undefined; // バウンディングボックスベースの地面接地オフセット
         this.reversingState = false; // バック走行状態を記憶
+        
+        // 車種情報
+        this.vehicleId = null;
+        this.vehicleSpec = null;
     }
 
     async loadModel(modelPath) {
+        console.log(`[VehicleManager] モデル読み込み開始: ${modelPath}`);
         return new Promise((resolve, reject) => {
             const loader = new THREE.GLTFLoader();
             loader.load(
                 modelPath,
                 (gltf) => {
+                    console.log(`[VehicleManager] モデル読み込み成功: ${modelPath}`);
                     this.carModel = gltf.scene;
                     this.carModel.traverse((child) => {
                         if (child.isMesh) {
@@ -39,36 +48,64 @@ export class VehicleManager {
                     });
                     resolve(this.carModel);
                 },
-                undefined,
+                (progress) => {
+                    if (progress.lengthComputable) {
+                        const percentComplete = progress.loaded / progress.total * 100;
+                        console.log(`[VehicleManager] 読み込み進捗: ${percentComplete.toFixed(2)}%`);
+                    }
+                },
                 (error) => {
-                    console.error('車両モデルの読み込みエラー:', error);
+                    console.error(`[VehicleManager] モデル読み込みエラー: ${modelPath}`, error);
                     reject(error);
                 }
             );
         });
     }
 
-    async createVehicle(modelPath = null, position = CONFIG.DEFAULTS.initialPosition) {
-        // モデルの読み込み（パスが指定されている場合）
-        if (modelPath) {
+    async createVehicle(vehicleIdOrPath = null, position = CONFIG.DEFAULTS.initialPosition) {
+        // 車種ID判定（rx7, r360など）
+        if (vehicleIdOrPath && (vehicleIdOrPath === 'rx7' || vehicleIdOrPath === 'r360')) {
+            this.vehicleId = vehicleIdOrPath;
+            this.vehicleSpec = getVehicleSpec(vehicleIdOrPath);
+            console.log(`[VehicleManager] 車種スペックを読み込み: ${this.vehicleSpec.info.name}`);
+            
+            // モデルパスをスペックから取得
+            const modelPath = this.vehicleSpec.model.url || this.vehicleSpec.model.fallbackUrl;
+            console.log(`[VehicleManager] 車種スペックからモデルパス取得: ${modelPath}`);
+            if (modelPath) {
+                try {
+                    await this.loadModel(modelPath);
+                    console.log(`[VehicleManager] モデル読み込み完了`);
+                } catch (error) {
+                    console.error('[VehicleManager] モデル読み込み失敗、デフォルトボックスを使用', error);
+                }
+            } else {
+                console.warn('[VehicleManager] モデルパスが指定されていません');
+            }
+        } else if (vehicleIdOrPath) {
+            // 従来の直接パス指定（互換性のため）
             try {
-                await this.loadModel(modelPath);
+                await this.loadModel(vehicleIdOrPath);
             } catch (error) {
                 console.warn('モデル読み込み失敗、デフォルトボックスを使用');
             }
         }
 
+        // 車種スペックから物理パラメータを取得（なければデフォルト）
+        const chassisMass = this.vehicleSpec ? this.vehicleSpec.physics.chassis.mass : CONFIG.VEHICLE.mass;
+        const chassisDimensions = this.vehicleSpec ? this.vehicleSpec.physics.chassis.dimensions : CONFIG.VEHICLE.chassis;
+
         // シャーシの物理ボディを作成（底部を斜めにカット）
         // CompoundBodyを使用して、より柔軟な形状を作成
         this.chassisBody = new CANNON.Body({
-            mass: CONFIG.VEHICLE.mass
+            mass: chassisMass
         });
         
         // メインボディ（少し小さく、高い位置に）
         const mainBodyShape = new CANNON.Box(new CANNON.Vec3(
-            CONFIG.VEHICLE.chassis.width / 2 * 0.9,  // 幅を10%縮小
-            CONFIG.VEHICLE.chassis.height / 2 * 0.7, // 高さを30%縮小
-            CONFIG.VEHICLE.chassis.depth / 2 * 0.85  // 奥行きを15%縮小
+            chassisDimensions.width / 2 * 0.9,  // 幅を10%縮小
+            chassisDimensions.height / 2 * 0.7, // 高さを30%縮小
+            chassisDimensions.length / 2 * 0.85  // 奥行きを15%縮小
         ));
         
         // 前後のスロープ形状（台形のような形）
@@ -76,12 +113,13 @@ export class VehicleManager {
         const slopeLength = 0.4;
         
         // コリジョンボックスを上にオフセットして追加（底面を上げる）
-        const collisionOffset = 0.35; // 35cm上にオフセット（増加）
+        // バウンディングボックスベースの調整がある場合は、コリジョンオフセットを減らす
+        const collisionOffset = this.modelGroundOffset !== undefined ? 0.2 : 0.35; // バウンディングボックスベースの場合は20cmに減らす
         this.chassisBody.addShape(mainBodyShape, new CANNON.Vec3(0, collisionOffset, 0));
         
         // フロントとリアに小さな補助コリジョンを追加（オプション）
         const helperShape = new CANNON.Box(new CANNON.Vec3(
-            CONFIG.VEHICLE.chassis.width / 2 * 0.8,
+            chassisDimensions.width / 2 * 0.8,
             0.1,
             0.2
         ));
@@ -89,19 +127,20 @@ export class VehicleManager {
         // フロント補助（やや前方、高い位置）
         this.chassisBody.addShape(
             helperShape, 
-            new CANNON.Vec3(0, collisionOffset - 0.1, CONFIG.VEHICLE.chassis.depth / 2 * 0.7)
+            new CANNON.Vec3(0, collisionOffset - 0.1, chassisDimensions.length / 2 * 0.7)
         );
         
         // リア補助（やや後方、高い位置）
         this.chassisBody.addShape(
             helperShape,
-            new CANNON.Vec3(0, collisionOffset - 0.1, -CONFIG.VEHICLE.chassis.depth / 2 * 0.7)
+            new CANNON.Vec3(0, collisionOffset - 0.1, -chassisDimensions.length / 2 * 0.7)
         );
         
         console.log('=== 車両物理設定 ===');
         console.log(`コリジョンボックスオフセット: ${collisionOffset}m（上方向）`);
         console.log(`3Dモデル表示オフセット: ${this.modelYOffset}m（下方向）`);
         console.log(`初期クリアランス: ${this.debugClearance}m`);
+        console.log(`バウンディングボックスベースオフセット: ${this.modelGroundOffset || '未設定'}`);
         console.log('==================');
         
         this.chassisBody.position.set(position.x, position.y, position.z);
@@ -109,6 +148,7 @@ export class VehicleManager {
 
         // シャーシのメッシュを作成またはモデルを使用
         if (this.carModel) {
+            console.log('[VehicleManager] 3Dモデルを使用');
             this.chassisMesh = this.carModel;
             // モデルのスケール調整
             const box = new THREE.Box3().setFromObject(this.carModel);
@@ -136,12 +176,22 @@ export class VehicleManager {
                 depth: CONFIG.VEHICLE.chassis.depth
             });
             
+            // バウンディングボックスの最低点を基準に車高を調整
+            const lowestPoint = finalBox.min.y;
+            console.log(`[車高調整] バウンディングボックス最低点: ${lowestPoint}`);
+            
+            // 3Dモデルの最低点が地面（Y=0）に接するようにオフセットを計算
+            this.modelGroundOffset = -lowestPoint;
+            console.log(`[車高調整] 地面接地オフセット: ${this.modelGroundOffset}`);
+            
             // バウンディングボックスヘルパーを作成（赤色で表示）
             this.boundingBoxHelper = new THREE.Box3Helper(finalBox, 0xff0000);
             this.boundingBoxHelper.visible = this.showBoundingBox;
             this.sceneManager.scene.add(this.boundingBoxHelper);
         } else {
             // デフォルトのボックスメッシュ
+            console.warn('[VehicleManager] 3Dモデルが利用できません。デフォルトの青いボックスを使用します');
+            console.log('[VehicleManager] this.carModel:', this.carModel);
             const chassisGeometry = new THREE.BoxGeometry(
                 CONFIG.VEHICLE.chassis.width,
                 CONFIG.VEHICLE.chassis.height,
@@ -172,26 +222,61 @@ export class VehicleManager {
         console.log('車両を物理世界に追加中...');
         this.vehicle.addToWorld(this.physicsManager.world);
         console.log('車両作成完了');
+        
+        // バウンディングボックスベースの車高調整を初期位置に反映
+        if (this.modelGroundOffset !== undefined && this.chassisBody) {
+            // 物理ボディの位置を調整して、モデルの最低点が地面に接するようにする
+            const currentY = this.chassisBody.position.y;
+            // 車種によって微調整
+            const groundClearance = this.vehicleId === 'r360' ? -0.15 : 0.02; // R360は-15cm（下げる）、それ以外は2cm
+            const adjustedY = currentY + this.modelGroundOffset + groundClearance;
+            this.chassisBody.position.y = adjustedY;
+            console.log(`[車高調整] 物理ボディY位置を調整: ${currentY} → ${adjustedY}`);
+        }
+        
+        // 衝突イベントの設定
+        this.setupCollisionEvents();
 
         return this.vehicle;
     }
+    
+    setupCollisionEvents() {
+        // 衝突イベントリスナー
+        this.chassisBody.addEventListener('collide', (event) => {
+            // 衝突相手が地面でない場合のみ音を再生
+            const contactNormal = event.contact.ni;
+            const relativeVelocity = event.contact.getImpactVelocityAlongNormal();
+            
+            // 衝突の強さを計算（0-1の範囲に正規化）
+            const impactForce = Math.min(Math.abs(relativeVelocity) / 10, 1);
+            
+            // 一定以上の衝撃の場合のみ音を再生
+            if (impactForce > 0.2 && event.body.mass > 0) {
+                audioIntegration.playCollision(impactForce);
+                console.log(`[衝突検知] 強度: ${impactForce.toFixed(2)}`);
+            }
+        });
+    }
 
     addWheels() {
+        // 車種スペックから取得（なければデフォルト）
+        const wheelSpec = this.vehicleSpec ? this.vehicleSpec.physics.wheel : CONFIG.VEHICLE.wheel;
+        
         const wheelOptions = {
-            radius: CONFIG.VEHICLE.wheel.radius,
+            radius: wheelSpec.radius,
             directionLocal: new CANNON.Vec3(0, -1, 0),
-            suspensionStiffness: CONFIG.VEHICLE.wheel.suspensionStiffness,
-            suspensionRestLength: CONFIG.VEHICLE.wheel.suspensionRestLength,
-            frictionSlip: CONFIG.VEHICLE.wheel.frictionSlip,
-            dampingRelaxation: CONFIG.VEHICLE.wheel.suspensionDamping,
-            dampingCompression: CONFIG.VEHICLE.wheel.suspensionCompression,
-            maxSuspensionForce: CONFIG.VEHICLE.wheel.maxSuspensionForce,
-            rollInfluence: CONFIG.VEHICLE.wheel.rollInfluence,
-            axleLocal: new CANNON.Vec3(1, 0, 0),
+            suspensionStiffness: wheelSpec.suspensionStiffness,
+            suspensionRestLength: wheelSpec.suspensionRestLength,
+            frictionSlip: wheelSpec.frictionSlip,
+            dampingRelaxation: wheelSpec.dampingRelaxation,
+            dampingCompression: wheelSpec.dampingCompression,
+            maxSuspensionForce: wheelSpec.maxSuspensionForce,
+            rollInfluence: wheelSpec.rollInfluence,
+            axleLocal: wheelSpec.axleLocal ? new CANNON.Vec3(wheelSpec.axleLocal.x, wheelSpec.axleLocal.y, wheelSpec.axleLocal.z) : new CANNON.Vec3(1, 0, 0),
             chassisConnectionPointLocal: new CANNON.Vec3(1, 0, 1),
-            maxSuspensionTravel: CONFIG.VEHICLE.wheel.maxSuspensionTravel,
-            customSlidingRotationalSpeed: -30,
-            useCustomSlidingRotationalSpeed: true,
+            maxSuspensionTravel: wheelSpec.maxSuspensionTravel,
+            customSlidingRotationalSpeed: wheelSpec.customSlidingRotationalSpeed || -30,
+            useCustomSlidingRotationalSpeed: wheelSpec.useCustomSlidingRotationalSpeed !== false,
             // バック走行を改善する設定
             sideAcceleration: 10, // 横方向の加速を増加
             forwardAcceleration: 1.5 // 前後方向の加速を追加
@@ -199,15 +284,16 @@ export class VehicleManager {
 
         // ホイール位置の定義（タイヤが地面に接地するよう調整）
         // コリジョンボックスと3Dモデルの差を考慮して、少し余裕を持たせる
-        const chassisHalfHeight = CONFIG.VEHICLE.chassis.height / 2;
+        const chassisDimensions = this.vehicleSpec ? this.vehicleSpec.physics.chassis.dimensions : CONFIG.VEHICLE.chassis;
+        const chassisHalfHeight = chassisDimensions.height / 2;
         // タイヤがコリジョンボックスより少し上になるように調整（デバッグ可能）
-        const wheelY = -chassisHalfHeight + CONFIG.VEHICLE.wheel.suspensionRestLength + CONFIG.VEHICLE.wheel.radius + this.debugClearance + 0.1; // さらに10cm上げる
+        const wheelY = -chassisHalfHeight + wheelSpec.suspensionRestLength + wheelSpec.radius + this.debugClearance + 0.1; // さらに10cm上げる
         
         const wheelPositions = [
-            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: CONFIG.VEHICLE.chassis.depth * 0.4 },   // 前左（やや前方に）
-            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: CONFIG.VEHICLE.chassis.depth * 0.4 },    // 前右（やや前方に）
-            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -CONFIG.VEHICLE.chassis.depth * 0.4 },  // 後左（やや後方に）
-            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -CONFIG.VEHICLE.chassis.depth * 0.4 }    // 後右（やや後方に）
+            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: chassisDimensions.length * 0.4 },   // 前左（やや前方に）
+            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: chassisDimensions.length * 0.4 },    // 前右（やや前方に）
+            { x: -CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -chassisDimensions.length * 0.4 },  // 後左（やや後方に）
+            { x: CONFIG.VEHICLE.wheel.axisPosition, y: wheelY, z: -chassisDimensions.length * 0.4 }    // 後右（やや後方に）
         ];
 
         wheelPositions.forEach((pos, index) => {
@@ -283,12 +369,16 @@ export class VehicleManager {
         // 速度と前方向の内積（正=前進、負=後退）
         const forwardSpeed = velocity.dot(forwardVector);
         
+        // 車種スペックから取得（なければデフォルト）
+        const engineSpec = this.vehicleSpec ? this.vehicleSpec.physics.engine : CONFIG.VEHICLE.engine;
+        const steeringSpec = this.vehicleSpec ? this.vehicleSpec.gameplay.handling : CONFIG.VEHICLE.steering;
+        
         // 前進操作時
         if (inputActions.acceleration) {
             // 論理的に正のエンジン力（前進）
             logicalEngineForce = inputActions.turbo ? 
-                CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.turboMultiplier : 
-                CONFIG.VEHICLE.engine.baseForce;
+                engineSpec.baseForce * engineSpec.turboMultiplier : 
+                engineSpec.baseForce;
             
             console.log(`[前進] 論理エンジン力: +${logicalEngineForce}N`);
         }
@@ -297,14 +387,14 @@ export class VehicleManager {
         else if (inputActions.braking) {
             if (forwardSpeed > 0.05) {
                 // 前進中 → ブレーキ
-                brakeForce = CONFIG.VEHICLE.engine.brakeForce;
+                brakeForce = engineSpec.engineBrake || CONFIG.VEHICLE.engine.brakeForce;
                 logicalEngineForce = 0;
                 console.log(`[ブレーキ] 前進速度: ${forwardSpeed.toFixed(2)} m/s`);
             } else {
                 // 停止または後退中 → バック
                 isReversing = true;
                 // 論理的に負のエンジン力（後退）
-                logicalEngineForce = -CONFIG.VEHICLE.engine.baseForce * CONFIG.VEHICLE.engine.reverseMultiplier;
+                logicalEngineForce = -engineSpec.baseForce * (CONFIG.VEHICLE.engine.reverseMultiplier || 0.5);
                 brakeForce = 0;
                 console.log(`[後退] 論理エンジン力: ${logicalEngineForce}N`);
             }
@@ -336,28 +426,24 @@ export class VehicleManager {
         }
 
         // 最高速度制限
-        if (currentSpeed > CONFIG.VEHICLE.engine.maxSpeed && logicalEngineForce > 0) {
+        if (currentSpeed > engineSpec.maxSpeed && logicalEngineForce > 0) {
             logicalEngineForce = 0;
             actualEngineForce = 0;
         }
 
         // ハンドブレーキの処理
         if (inputActions.handbrake) {
-            brakeForce = CONFIG.VEHICLE.engine.brakeForce * 2;
+            brakeForce = (engineSpec.engineBrake || CONFIG.VEHICLE.engine.brakeForce) * 2;
         }
 
         // ステアリング
         let steering = 0;
-        if (inputActions.left) steering = CONFIG.VEHICLE.steering.baseMaxSteerVal;
-        if (inputActions.right) steering = -CONFIG.VEHICLE.steering.baseMaxSteerVal;
+        if (inputActions.left) steering = steeringSpec.steeringClamp || CONFIG.VEHICLE.steering.baseMaxSteerVal;
+        if (inputActions.right) steering = -(steeringSpec.steeringClamp || CONFIG.VEHICLE.steering.baseMaxSteerVal);
 
         // 速度に応じたステアリング感度の調整
-        if (currentSpeed > CONFIG.VEHICLE.steering.highSpeedThreshold) {
-            const steerFactor = Math.max(
-                CONFIG.VEHICLE.steering.minFactorAtHighSpeed,
-                1 - (currentSpeed - CONFIG.VEHICLE.steering.highSpeedThreshold) / 
-                    CONFIG.VEHICLE.steering.reductionSpeedRange
-            );
+        if (currentSpeed > (CONFIG.VEHICLE.steering.highSpeedThreshold || 20)) {
+            const steerFactor = steeringSpec.steeringSpeedFactor || 0.8;
             steering *= steerFactor;
         }
 
@@ -546,8 +632,21 @@ export class VehicleManager {
         if (this.chassisMesh && this.chassisBody) {
             // 物理ボディの位置をコピー
             this.chassisMesh.position.copy(this.chassisBody.position);
-            // 3Dモデルを下にオフセット（コリジョンボックスが上にオフセットされているため）
-            this.chassisMesh.position.y += this.modelYOffset;
+            
+            // 3Dモデルの高さ調整
+            // バウンディングボックスベースのオフセットがある場合はそれを優先
+            if (this.modelGroundOffset !== undefined) {
+                // バウンディングボックスの最低点が地面に接するように調整
+                // コリジョンオフセットが小さくなっているので、その分を考慮
+                // 車種によって微調整
+                const yAdjustment = this.vehicleId === 'r360' ? -0.05 : -0.15; // R360用に調整
+                this.chassisMesh.position.y = this.chassisBody.position.y + yAdjustment;
+            } else {
+                // 従来のオフセット方式
+                this.chassisMesh.position.y += this.modelYOffset;
+            }
+            
+            // 回転をコピー
             this.chassisMesh.quaternion.copy(this.chassisBody.quaternion);
         }
     }

@@ -706,9 +706,9 @@ export class TerrainManager {
             mesh: boostGroup,
             body: triggerBody,
             rotation: rotation,
-            boostForce: 5000,
+            boostForce: 2000,     // Bruno Simon風に調整（楽しさ重視）
             cooldown: 0,
-            maxCooldown: 2
+            maxCooldown: 1.5      // クールダウンも短く
         });
     }
     
@@ -846,13 +846,12 @@ export class TerrainManager {
             
             const distance = vehicleBody.position.vsub(pad.body.position).length();
             if (distance < 2.5) {
-                // 瞬間的な速度変化のためimpulseを使用（forceより効果的）
-                // 車両の質量を考慮した強力なジャンプ力
-                const jumpImpulse = new CANNON.Vec3(0, 800, 0); // 1200kgの車を跳ね上げるのに十分な力
+                // Bruno Simon風のジャンプ（軽い車体で楽しいジャンプ）
+                const jumpImpulse = new CANNON.Vec3(0, 200, 0); // 軽い車体に合わせた力
                 vehicleBody.applyImpulse(jumpImpulse, vehicleBody.position);
                 
-                // 上向きの速度も直接設定（確実にジャンプさせる）
-                vehicleBody.velocity.y = Math.max(vehicleBody.velocity.y, 15); // 最低15m/sの上向き速度
+                // 上向きの速度も設定（楽しさ重視）
+                vehicleBody.velocity.y = Math.max(vehicleBody.velocity.y, 12); // 適度な高さ
                 
                 pad.cooldown = pad.maxCooldown;
                 pad.animationTime = 0.5;

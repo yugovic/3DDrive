@@ -7,6 +7,7 @@ import { UIManager } from './ui.js';
 import { VehicleManager } from './vehicle.js';
 import { TerrainManager } from './terrain.js';
 import { ItemManager } from './items.js';
+import { audioIntegration } from './audio-integration.js';
 
 export class Game {
     constructor() {
@@ -59,12 +60,27 @@ export class Game {
             // 車両マネージャーの作成と初期化
             console.log('初期化開始: VehicleManager');
             this.vehicleManager = new VehicleManager(this.physicsManager, this.sceneManager);
-            await this.vehicleManager.createVehicle(this.selectedCarModel);
+            await this.vehicleManager.createVehicle(selectedCar);
 
             // アイテムマネージャーの作成と初期化
             console.log('初期化開始: ItemManager');
             this.itemManager = new ItemManager(this.sceneManager, this.uiManager);
             this.itemManager.init();
+
+            // 音響システムの初期化
+            console.log('初期化開始: AudioSystem');
+            await audioIntegration.init();
+            
+            // 車種スペックを音響システムに設定
+            if (this.vehicleManager.vehicleSpec) {
+                audioIntegration.setVehicleSpec(this.vehicleManager.vehicleSpec);
+                console.log(`[Main] 車種スペックを音響システムに設定: ${this.vehicleManager.vehicleSpec.info.name}`);
+                
+                // UIに車種名を表示
+                this.uiManager.updateVehicleName(this.vehicleManager.vehicleSpec.info.displayName);
+            }
+            
+            audioIntegration.startEngine();
 
             // 入力コールバックの設定
             this.setupInputCallbacks();
@@ -72,6 +88,7 @@ export class Game {
             // UIの初期設定
             this.uiManager.showInstructions(true);
             this.uiManager.showLoading(false);
+            this.uiManager.updateEngineMode(false); // デフォルトはシンプルモード
 
             // ゲーム開始
             console.log('ゲーム開始');
@@ -112,6 +129,22 @@ export class Game {
         this.inputManager.setCallback('onHelpToggle', () => {
             const helpVisible = this.uiManager.elements.instructions.style.display === 'block';
             this.uiManager.showInstructions(!helpVisible);
+        });
+
+        // 音響ミュート切替
+        this.inputManager.setCallback('onMuteToggle', () => {
+            const isEnabled = audioIntegration.toggleMute();
+            this.uiManager.showMessage(`音響: ${isEnabled ? 'ON' : 'OFF'}`, 2000);
+        });
+
+        // エンジン音モード切替
+        console.log('[Main] エンジン音モード切替コールバックを設定');
+        this.inputManager.setCallback('onEngineModeToggle', () => {
+            console.log('[Main] エンジン音モード切替コールバックが呼ばれました');
+            const isAdvanced = audioIntegration.toggleEngineMode();
+            console.log(`[Main] 新しいモード: ${isAdvanced ? '高度' : 'シンプル'}`);
+            this.uiManager.showMessage(`エンジン音: ${isAdvanced ? '高度モード' : 'シンプルモード'}`, 2000);
+            this.uiManager.updateEngineMode(isAdvanced);
         });
 
         // 車高調整
@@ -181,6 +214,16 @@ export class Game {
         const inputActions = this.inputManager.getVehicleActions();
         this.vehicleManager.update(inputActions, deltaTime);
         this.vehicleManager.syncMeshWithBody();
+        
+        // 音響システムに車両状態を送信
+        const vehicleSpeed = this.vehicleManager.getSpeed();
+        const vehicleState = {
+            speed: vehicleSpeed,
+            acceleration: inputActions.acceleration ? 1 : (inputActions.braking ? -1 : 0),
+            isTurbo: inputActions.turbo || false,
+            isDrifting: Math.abs(this.vehicleManager.chassisBody?.angularVelocity.y || 0) > 2 && vehicleSpeed > 5
+        };
+        audioIntegration.updateVehicleState(vehicleState);
 
         // 地形更新（車両ボディを渡す）
         this.terrainManager.update(deltaTime, this.vehicleManager.chassisBody);

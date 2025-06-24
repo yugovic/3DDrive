@@ -3,6 +3,7 @@ import * as CONFIG from './config.js';
 
 export class InputManager {
     constructor() {
+        this.isInitialized = false;
         this.keys = {};
         this.vehicleActions = {
             acceleration: false,
@@ -20,7 +21,9 @@ export class InputManager {
             onSlopeAdjust: null,
             onCameraAdjust: null,
             onBoundingBoxToggle: null,
-            onBodyHeightAdjust: null
+            onBodyHeightAdjust: null,
+            onMuteToggle: null,
+            onEngineModeToggle: null
         };
     }
 
@@ -28,6 +31,8 @@ export class InputManager {
         // キーボードイベントリスナーの設定
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
         document.addEventListener('keyup', (e) => this.onKeyUp(e));
+        this.isInitialized = true;
+        console.log('[InputManager] 初期化完了');
     }
 
     onKeyDown(event) {
@@ -79,6 +84,35 @@ export class InputManager {
             case 'KeyH':
                 if (this.callbacks.onHelpToggle) {
                     this.callbacks.onHelpToggle();
+                }
+                break;
+                
+            case 'KeyM':
+                console.log('[Input] Mキーが押されました');
+                if (this.callbacks.onMuteToggle) {
+                    this.callbacks.onMuteToggle();
+                } else {
+                    console.warn('[Input] onMuteToggleコールバックが設定されていません');
+                }
+                break;
+                
+            case 'KeyN':
+                // 車種選択画面が表示されている場合は無視
+                const carSelectionModal = document.getElementById('car-selection-modal');
+                if (carSelectionModal && carSelectionModal.style.display !== 'none') {
+                    console.log('[Input Debug] 車種選択画面表示中のため、Nキーを無視します');
+                    return;
+                }
+                
+                console.log('[Input Debug] Nキーが押されました！');
+                console.log('[Input Debug] callbacks全体:', this.callbacks);
+                console.log('[Input Debug] onEngineModeToggle:', this.callbacks.onEngineModeToggle);
+                if (this.callbacks.onEngineModeToggle) {
+                    console.log('[Input Debug] onEngineModeToggleコールバックを実行します');
+                    this.callbacks.onEngineModeToggle();
+                } else {
+                    console.warn('[Input Debug] onEngineModeToggleコールバックが設定されていません！');
+                    console.warn('[Input Debug] ゲームが開始されていない可能性があります');
                 }
                 break;
                 
