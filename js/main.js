@@ -190,6 +190,20 @@ export class Game {
                 );
             }
         });
+
+        // デバッグログ切替（Ctrl+D）
+        this.inputManager.setCallback('onDebugLogToggle', () => {
+            this.vehicleManager.debugLogging = !this.vehicleManager.debugLogging;
+            const status = this.vehicleManager.debugLogging ? 'ON' : 'OFF';
+            
+            // 音響システムのデバッグログも連動
+            import('./audio-integration.js').then(module => {
+                module.setAudioDebugLogging(this.vehicleManager.debugLogging);
+            });
+            
+            this.uiManager.showMessage(`デバッグログ: ${status}`, 2000);
+            console.log(`[Main] デバッグログ表示: ${status}`);
+        });
     }
 
     // 車両リセット共通関数

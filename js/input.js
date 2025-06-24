@@ -23,7 +23,8 @@ export class InputManager {
             onBoundingBoxToggle: null,
             onBodyHeightAdjust: null,
             onMuteToggle: null,
-            onEngineModeToggle: null
+            onEngineModeToggle: null,
+            onDebugLogToggle: null  // デバッグログ切替用
         };
     }
 
@@ -40,10 +41,10 @@ export class InputManager {
         this.keys[event.code] = true;
         
         // デバッグ用：全キー入力のログ（開発中）
-        console.log(`[Key Debug] 押されたキー: ${event.code} (${event.key})`);
-        if (event.code === 'Digit9' || event.code === 'Digit0') {
-            console.log(`[Key Debug] 9/0キー検出！コード: ${event.code}`);
-        }
+        // console.log(`[Key Debug] 押されたキー: ${event.code} (${event.key})`);
+        // if (event.code === 'Digit9' || event.code === 'Digit0') {
+        //     console.log(`[Key Debug] 9/0キー検出！コード: ${event.code}`);
+        // }
 
         // 車両操作の更新
         if (CONFIG.KEY_MAPPINGS[event.code]) {
@@ -81,6 +82,14 @@ export class InputManager {
                 }
                 break;
                 
+            case 'KeyD':
+                // Ctrl+D でデバッグログ切替
+                if (event.ctrlKey && this.callbacks.onDebugLogToggle) {
+                    event.preventDefault(); // ブラウザのデフォルト動作を防ぐ
+                    this.callbacks.onDebugLogToggle();
+                }
+                break;
+                
             case 'KeyH':
                 if (this.callbacks.onHelpToggle) {
                     this.callbacks.onHelpToggle();
@@ -88,11 +97,11 @@ export class InputManager {
                 break;
                 
             case 'KeyM':
-                console.log('[Input] Mキーが押されました');
+                // console.log('[Input] Mキーが押されました');
                 if (this.callbacks.onMuteToggle) {
                     this.callbacks.onMuteToggle();
                 } else {
-                    console.warn('[Input] onMuteToggleコールバックが設定されていません');
+                    // console.warn('[Input] onMuteToggleコールバックが設定されていません');
                 }
                 break;
                 
@@ -100,19 +109,19 @@ export class InputManager {
                 // 車種選択画面が表示されている場合は無視
                 const carSelectionModal = document.getElementById('car-selection-modal');
                 if (carSelectionModal && carSelectionModal.style.display !== 'none') {
-                    console.log('[Input Debug] 車種選択画面表示中のため、Nキーを無視します');
+                    // console.log('[Input Debug] 車種選択画面表示中のため、Nキーを無視します');
                     return;
                 }
                 
-                console.log('[Input Debug] Nキーが押されました！');
-                console.log('[Input Debug] callbacks全体:', this.callbacks);
-                console.log('[Input Debug] onEngineModeToggle:', this.callbacks.onEngineModeToggle);
+                // console.log('[Input Debug] Nキーが押されました！');
+                // console.log('[Input Debug] callbacks全体:', this.callbacks);
+                // console.log('[Input Debug] onEngineModeToggle:', this.callbacks.onEngineModeToggle);
                 if (this.callbacks.onEngineModeToggle) {
-                    console.log('[Input Debug] onEngineModeToggleコールバックを実行します');
+                    // console.log('[Input Debug] onEngineModeToggleコールバックを実行します');
                     this.callbacks.onEngineModeToggle();
                 } else {
-                    console.warn('[Input Debug] onEngineModeToggleコールバックが設定されていません！');
-                    console.warn('[Input Debug] ゲームが開始されていない可能性があります');
+                    // console.warn('[Input Debug] onEngineModeToggleコールバックが設定されていません！');
+                    // console.warn('[Input Debug] ゲームが開始されていない可能性があります');
                 }
                 break;
                 

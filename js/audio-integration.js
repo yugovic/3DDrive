@@ -1,8 +1,17 @@
 // 音響システム統合モジュール
 // 高度な音響エンジンを既存のゲームシステムに統合
 
-import { AdvancedAudioManager } from './audio-engine.js';
+import { AdvancedAudioManager, setAudioEngineDebugLogging } from './audio-engine.js';
 import * as CONFIG from './config.js';
+
+// グローバルデバッグフラグ
+let AUDIO_DEBUG_LOGGING = false;
+
+export function setAudioDebugLogging(enabled) {
+    AUDIO_DEBUG_LOGGING = enabled;
+    // audio-engine.jsのデバッグフラグも連動
+    setAudioEngineDebugLogging(enabled);
+}
 
 /**
  * 音響管理統合クラス
@@ -44,7 +53,9 @@ export class AudioIntegration {
             
             // エンジンモードの設定
             const useAdvancedMode = audioConfig.engine.mode === 'advanced';
-            console.log(`[AudioIntegration] 車種別音響設定: ${vehicleSpec.info.name} - モード: ${audioConfig.engine.mode}`);
+            if (AUDIO_DEBUG_LOGGING) {
+                console.log(`[AudioIntegration] 車種別音響設定: ${vehicleSpec.info.name} - モード: ${audioConfig.engine.mode}`);
+            }
             this.audioManager.setEngineMode(useAdvancedMode);
             
             // 将来の拡張用: エンジンタイプ別の音響パラメータ設定
@@ -60,8 +71,10 @@ export class AudioIntegration {
     async init() {
         try {
             await this.audioManager.init();
-            console.log('音響システム統合完了');
-            console.log(`[音響システム] 初期エンジンモード: ${this.audioManager.useAdvancedEngineMode ? '高度' : 'シンプル'}`);
+            if (AUDIO_DEBUG_LOGGING) {
+                console.log('音響システム統合完了');
+                console.log(`[音響システム] 初期エンジンモード: ${this.audioManager.useAdvancedEngineMode ? '高度' : 'シンプル'}`);
+            }
             
             // ユーザー操作でAudioContextを再開
             this.setupUserInteraction();
@@ -96,7 +109,7 @@ export class AudioIntegration {
         this.audioManager.startEngine();
         this.isEngineRunning = true;
         
-        if (this.debugMode) {
+        if (AUDIO_DEBUG_LOGGING) {
             console.log('エンジン音開始');
         }
     }
@@ -110,7 +123,7 @@ export class AudioIntegration {
         this.audioManager.stopEngine();
         this.isEngineRunning = false;
         
-        if (this.debugMode) {
+        if (AUDIO_DEBUG_LOGGING) {
             console.log('エンジン音停止');
         }
     }
@@ -163,7 +176,7 @@ export class AudioIntegration {
         
         this.audioManager.playCollision(impactForce);
         
-        if (this.debugMode) {
+        if (AUDIO_DEBUG_LOGGING) {
             console.log(`衝突音再生: 強度 ${impactForce}`);
         }
     }
@@ -249,20 +262,28 @@ export class AudioIntegration {
      * エンジン音モードの切り替え
      */
     toggleEngineMode() {
-        console.log('[AudioIntegration] toggleEngineMode開始');
-        console.log('[AudioIntegration] AudioContext状態:', this.audioManager.context?.state);
+        if (AUDIO_DEBUG_LOGGING) {
+            console.log('[AudioIntegration] toggleEngineMode開始');
+            console.log('[AudioIntegration] AudioContext状態:', this.audioManager.context?.state);
+        }
         
         // AudioContextがサスペンド状態の場合は再開
         if (this.audioManager.context?.state === 'suspended') {
-            console.log('[AudioIntegration] AudioContextがサスペンド状態です。再開を試みます...');
+            if (AUDIO_DEBUG_LOGGING) {
+                console.log('[AudioIntegration] AudioContextがサスペンド状態です。再開を試みます...');
+            }
             this.audioManager.context.resume().then(() => {
-                console.log('[AudioIntegration] AudioContextを再開しました');
+                if (AUDIO_DEBUG_LOGGING) {
+                    console.log('[AudioIntegration] AudioContextを再開しました');
+                }
             });
         }
         
         const currentMode = this.audioManager.useAdvancedEngineMode;
         const newMode = !currentMode;
-        console.log(`[toggleEngineMode] 現在: ${currentMode ? '高度' : 'シンプル'} → 新規: ${newMode ? '高度' : 'シンプル'}`);
+        if (AUDIO_DEBUG_LOGGING) {
+            console.log(`[toggleEngineMode] 現在: ${currentMode ? '高度' : 'シンプル'} → 新規: ${newMode ? '高度' : 'シンプル'}`);
+        }
         this.audioManager.setEngineMode(newMode);
         return newMode;
     }
@@ -280,7 +301,9 @@ export class AudioIntegration {
         }
         
         // AudioContextのクローズは通常不要（ブラウザが管理）
-        console.log('音響システムをクリーンアップしました');
+        if (AUDIO_DEBUG_LOGGING) {
+            console.log('音響システムをクリーンアップしました');
+        }
     }
 }
 

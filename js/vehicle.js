@@ -25,6 +25,7 @@ export class VehicleManager {
         this.modelYOffset = -0.2; // 3Dモデルの表示オフセット（コリジョンオフセットと同じ値）
         this.modelGroundOffset = undefined; // バウンディングボックスベースの地面接地オフセット
         this.reversingState = false; // バック走行状態を記憶
+        this.debugLogging = false; // デバッグログ出力フラグ
         
         // 車種情報
         this.vehicleId = null;
@@ -253,7 +254,9 @@ export class VehicleManager {
             // 一定以上の衝撃の場合のみ音を再生
             if (impactForce > 0.2 && event.body.mass > 0) {
                 audioIntegration.playCollision(impactForce);
-                console.log(`[衝突検知] 強度: ${impactForce.toFixed(2)}`);
+                if (this.debugLogging) {
+                    console.log(`[衝突検知] 強度: ${impactForce.toFixed(2)}`);
+                }
             }
         });
     }
@@ -380,7 +383,9 @@ export class VehicleManager {
                 engineSpec.baseForce * engineSpec.turboMultiplier : 
                 engineSpec.baseForce;
             
-            console.log(`[前進] 論理エンジン力: +${logicalEngineForce}N`);
+            if (this.debugLogging) {
+                console.log(`[前進] 論理エンジン力: +${logicalEngineForce}N`);
+            }
         }
         
         // ブレーキ/バック操作時
@@ -389,14 +394,18 @@ export class VehicleManager {
                 // 前進中 → ブレーキ
                 brakeForce = engineSpec.engineBrake || CONFIG.VEHICLE.engine.brakeForce;
                 logicalEngineForce = 0;
-                console.log(`[ブレーキ] 前進速度: ${forwardSpeed.toFixed(2)} m/s`);
+                if (this.debugLogging) {
+                    console.log(`[ブレーキ] 前進速度: ${forwardSpeed.toFixed(2)} m/s`);
+                }
                 
                 // ブレーキングドリフト: 高速でブレーキ＋ステアリング時にリアグリップを減少
                 if (currentSpeed > 8 && (inputActions.left || inputActions.right)) {
                     // 後輪のfrictionSlipを一時的に下げる
                     this.vehicle.wheelInfos[2].frictionSlip = 2; // 後左輪
                     this.vehicle.wheelInfos[3].frictionSlip = 2; // 後右輪
-                    console.log('[ドリフト] ブレーキングドリフト開始');
+                    if (this.debugLogging) {
+                        console.log('[ドリフト] ブレーキングドリフト開始');
+                    }
                 } else {
                     // 通常のグリップに戻す
                     this.vehicle.wheelInfos[2].frictionSlip = CONFIG.VEHICLE.wheel.frictionSlip;
@@ -408,7 +417,9 @@ export class VehicleManager {
                 // 論理的に負のエンジン力（後退）
                 logicalEngineForce = -engineSpec.baseForce * (CONFIG.VEHICLE.engine.reverseMultiplier || 0.5);
                 brakeForce = 0;
-                console.log(`[後退] 論理エンジン力: ${logicalEngineForce}N`);
+                if (this.debugLogging) {
+                    console.log(`[後退] 論理エンジン力: ${logicalEngineForce}N`);
+                }
             }
         } else {
             // ブレーキを離したら通常のグリップに戻す
@@ -421,7 +432,7 @@ export class VehicleManager {
         actualEngineForce = -logicalEngineForce;
         
         // デバッグ出力
-        if (logicalEngineForce !== 0 || brakeForce !== 0) {
+        if (this.debugLogging && (logicalEngineForce !== 0 || brakeForce !== 0)) {
             console.log('=== エンジン力変換 ===');
             console.log(`論理的エンジン力: ${logicalEngineForce}N (正=前進, 負=後退)`);
             console.log(`実際の適用力: ${actualEngineForce}N (RaycastVehicle用)`);
@@ -488,7 +499,9 @@ export class VehicleManager {
             const backwardForce = new CANNON.Vec3(0, 0, logicalEngineForce * 0.5); // エンジン力の50%を追加
             this.chassisBody.quaternion.vmult(backwardForce, backwardForce);
             this.chassisBody.applyLocalForce(backwardForce, new CANNON.Vec3(0, 0, 0));
-            console.log(`[後退補助] 追加推進力: ${logicalEngineForce * 0.5}N`);
+            if (this.debugLogging) {
+                console.log(`[後退補助] 追加推進力: ${logicalEngineForce * 0.5}N`);
+            }
         }
         
         // ブレーキを各ホイールに適用

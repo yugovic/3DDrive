@@ -1,6 +1,13 @@
 // 高度な音響エンジンモジュール - プロシージャル音響生成
 import * as CONFIG from './config.js';
 
+// グローバルデバッグフラグ（audio-integrationから設定される）
+let AUDIO_DEBUG_LOGGING = false;
+
+export function setAudioEngineDebugLogging(enabled) {
+    AUDIO_DEBUG_LOGGING = enabled;
+}
+
 /**
  * 音響パラメータープリセット
  * 各音響効果の詳細なパラメーターを定義
@@ -199,7 +206,7 @@ class EngineSound {
         const preset = AUDIO_PRESETS.engine.idle;
         
         // シンプルモード：基本的な単一オシレーターのみ
-        console.log('[シンプルモード] 単一オシレーターで初期化');
+        if (AUDIO_DEBUG_LOGGING) console.log('[シンプルモード] 単一オシレーターで初期化');
         
         // シンプルなエンジン音（単一のオシレーター）
         this.simpleOsc = this.context.createOscillator();
@@ -365,7 +372,7 @@ class EngineSound {
         
         if (this.useAdvancedMode) {
             // アドバンスドモードの起動
-            console.log('[高度モード] 複数レイヤーを起動');
+            if (AUDIO_DEBUG_LOGGING) console.log('[高度モード] 複数レイヤーを起動');
             this.harmonic.oscillators.forEach(osc => osc.start(now));
             this.vibrationLFO.oscillator.start(now);
             this.exhaustPulse.start(now);
@@ -376,7 +383,7 @@ class EngineSound {
             this.noise.source.start(now);
         } else {
             // シンプルモードの起動
-            console.log('[シンプルモード] 単一オシレーターを起動');
+            if (AUDIO_DEBUG_LOGGING) console.log('[シンプルモード] 単一オシレーターを起動');
             this.simpleOsc.start(now);
             this.vibrationLFO.oscillator.start(now);
             this.noise.source.start(now);
@@ -404,7 +411,7 @@ class EngineSound {
         
         // デバッグ情報（定期的に表示）
         if (Math.random() < 0.02) { // 2%の確率で表示（頻度を抑える）
-            console.log(`[エンジン音] モード: ${this.useAdvancedMode ? '高度' : 'シンプル'}, 速度: ${speed.toFixed(1)}, RPM: ${(rpm * 100).toFixed(0)}%`);
+            if (AUDIO_DEBUG_LOGGING) console.log(`[エンジン音] モード: ${this.useAdvancedMode ? '高度' : 'シンプル'}, 速度: ${speed.toFixed(1)}, RPM: ${(rpm * 100).toFixed(0)}%`);
         }
         
         // 加速/減速による周波数調整
@@ -450,7 +457,7 @@ class EngineSound {
             
             // デバッグ：アドバンスドモード特有の情報
             if (Math.random() < 0.01) {
-                console.log(`[高度モード] 排気: ${exhaustIntensity.toFixed(2)}, 吸気: ${intakeIntensity.toFixed(2)}, 共鳴: ${resonancePeak.toFixed(2)}`);
+                if (AUDIO_DEBUG_LOGGING) console.log(`[高度モード] 排気: ${exhaustIntensity.toFixed(2)}, 吸気: ${intakeIntensity.toFixed(2)}, 共鳴: ${resonancePeak.toFixed(2)}`);
             }
         }
         
@@ -475,7 +482,7 @@ class EngineSound {
         // 少し遅れて停止
         setTimeout(() => {
             if (this.useAdvancedMode) {
-                console.log('[高度モード] 全レイヤーを停止');
+                if (AUDIO_DEBUG_LOGGING) console.log('[高度モード] 全レイヤーを停止');
                 this.harmonic.oscillators.forEach(osc => osc.stop());
                 this.vibrationLFO.oscillator.stop();
                 this.exhaustPulse.stop();
@@ -485,7 +492,7 @@ class EngineSound {
                 this.resonanceOsc.stop();
                 this.noise.source.stop();
             } else {
-                console.log('[シンプルモード] オシレーターを停止');
+                if (AUDIO_DEBUG_LOGGING) console.log('[シンプルモード] オシレーターを停止');
                 this.simpleOsc.stop();
                 this.vibrationLFO.oscillator.stop();
                 this.noise.source.stop();
@@ -805,7 +812,7 @@ export class AdvancedAudioManager {
         this.createEffectsChain();
         
         // 各音響ジェネレーターの作成
-        console.log(`[音響システム] エンジン音を${this.useAdvancedEngineMode ? '高度' : 'シンプル'}モードで初期化`);
+        if (AUDIO_DEBUG_LOGGING) console.log(`[音響システム] エンジン音を${this.useAdvancedEngineMode ? '高度' : 'シンプル'}モードで初期化`);
         this.sounds.engine = new EngineSound(this.context, this.nodeFactory, this.useAdvancedEngineMode);
         this.sounds.turbo = new TurboSound(this.context, this.nodeFactory);
         this.sounds.collision = new CollisionSound(this.context, this.nodeFactory);
@@ -817,7 +824,7 @@ export class AdvancedAudioManager {
         
         this.isInitialized = true;
         
-        console.log('高度な音響システムが初期化されました');
+        if (AUDIO_DEBUG_LOGGING) console.log('高度な音響システムが初期化されました');
     }
     
     createEffectsChain() {
@@ -926,7 +933,7 @@ export class AdvancedAudioManager {
     async resume() {
         if (this.context && this.context.state === 'suspended') {
             await this.context.resume();
-            console.log('AudioContext再開');
+            if (AUDIO_DEBUG_LOGGING) console.log('AudioContext再開');
         }
     }
     
@@ -936,18 +943,18 @@ export class AdvancedAudioManager {
         
         this.useAdvancedEngineMode = useAdvanced;
         
-        console.log('=====================================');
-        console.log(`🔊 エンジン音モード切替`);
-        console.log(`旧モード: ${!useAdvanced ? '高度' : 'シンプル'}`);
-        console.log(`新モード: ${useAdvanced ? '高度' : 'シンプル'}`);
-        console.log('=====================================');
+        if (AUDIO_DEBUG_LOGGING) console.log('=====================================');
+        if (AUDIO_DEBUG_LOGGING) console.log(`🔊 エンジン音モード切替`);
+        if (AUDIO_DEBUG_LOGGING) console.log(`旧モード: ${!useAdvanced ? '高度' : 'シンプル'}`);
+        if (AUDIO_DEBUG_LOGGING) console.log(`新モード: ${useAdvanced ? '高度' : 'シンプル'}`);
+        if (AUDIO_DEBUG_LOGGING) console.log('=====================================');
         
         // AudioContext の状態確認
-        console.log(`[AudioEngine] AudioContext状態: ${this.context.state}`);
+        if (AUDIO_DEBUG_LOGGING) console.log(`[AudioEngine] AudioContext状態: ${this.context.state}`);
         if (this.context.state === 'suspended') {
-            console.log('[AudioEngine] AudioContextがsuspended状態です。再開を試みます...');
+            if (AUDIO_DEBUG_LOGGING) console.log('[AudioEngine] AudioContextがsuspended状態です。再開を試みます...');
             this.context.resume().then(() => {
-                console.log('[AudioEngine] AudioContext再開成功');
+                if (AUDIO_DEBUG_LOGGING) console.log('[AudioEngine] AudioContext再開成功');
             });
         }
         
@@ -956,13 +963,13 @@ export class AdvancedAudioManager {
         
         // エンジンが動作中の場合は再作成
         if (this.sounds.engine && this.sounds.engine.isPlaying) {
-            console.log('エンジン音を再起動中...');
+            if (AUDIO_DEBUG_LOGGING) console.log('エンジン音を再起動中...');
             this.sounds.engine.stop();
             setTimeout(() => {
                 this.sounds.engine = new EngineSound(this.context, this.nodeFactory, this.useAdvancedEngineMode);
                 this.sounds.engine.connect(this.effects.input);
                 this.sounds.engine.start();
-                console.log('エンジン音再起動完了');
+                if (AUDIO_DEBUG_LOGGING) console.log('エンジン音再起動完了');
             }, 600);
         } else if (this.sounds.engine) {
             this.sounds.engine = new EngineSound(this.context, this.nodeFactory, this.useAdvancedEngineMode);
@@ -972,9 +979,9 @@ export class AdvancedAudioManager {
     
     // モード切り替え音
     playModeChangeSound(isAdvanced) {
-        console.log('[Audio] playModeChangeSound呼び出し開始');
-        console.log('[Audio] AudioContext状態:', this.context.state);
-        console.log('[Audio] マスターゲイン値:', this.masterGain.gain.value);
+        if (AUDIO_DEBUG_LOGGING) console.log('[Audio] playModeChangeSound呼び出し開始');
+        if (AUDIO_DEBUG_LOGGING) console.log('[Audio] AudioContext状態:', this.context.state);
+        if (AUDIO_DEBUG_LOGGING) console.log('[Audio] マスターゲイン値:', this.masterGain.gain.value);
         
         const now = this.context.currentTime;
         const osc = this.context.createOscillator();
@@ -986,7 +993,7 @@ export class AdvancedAudioManager {
         gain.gain.setValueAtTime(0.5, now); // 音量を0.2から0.5に増加
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
         
-        console.log(`[Audio] ビープ音設定 - 周波数: ${frequency}Hz, 音量: 0.5`);
+        if (AUDIO_DEBUG_LOGGING) console.log(`[Audio] ビープ音設定 - 周波数: ${frequency}Hz, 音量: 0.5`);
         
         osc.connect(gain);
         gain.connect(this.masterGain);
@@ -994,6 +1001,6 @@ export class AdvancedAudioManager {
         osc.start(now);
         osc.stop(now + 0.2);
         
-        console.log('[Audio] ビープ音を開始しました');
+        if (AUDIO_DEBUG_LOGGING) console.log('[Audio] ビープ音を開始しました');
     }
 }
