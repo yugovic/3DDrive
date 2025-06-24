@@ -11,7 +11,7 @@ export const VEHICLE = {
     },
     mass: 180, // kg（Bruno Simon風に軽量化 - アーケード的な動きのため）
     
-    // ホイール設定（Bruno Simon風）
+    // ホイール設定（ブレーキングドリフト対応）
     wheel: {
         radius: 0.3,              // 少し小さめのタイヤでトイカー感
         thickness: 0.25,
@@ -20,17 +20,17 @@ export const VEHICLE = {
         suspensionDamping: 8,     // 適度なダンピング
         suspensionCompression: 4.4,
         suspensionRestLength: 0.35,
-        frictionSlip: 3,          // 大幅に低く（ドリフトしやすく）
+        frictionSlip: 8,          // 3→8に増加（グリップを少し強化してブレーキ時の挙動を制御しやすく）
         rollInfluence: 0.05,      // 横転しにくさを維持
         maxSuspensionTravel: 0.4,
         maxSuspensionForce: 100000
     },
     
-    // エンジン・ブレーキ設定（Bruno Simon風）
+    // エンジン・ブレーキ設定（ブレーキングドリフト対応）
     engine: {
         baseForce: 500,           // N（レスポンシブだが過剰でない）
         turboMultiplier: 3,       // ターボで3倍のパワー！
-        brakeForce: 15,           // ブレーキは適度に（スライドを楽しむ）
+        brakeForce: 35,           // 15→35に増加（強いブレーキでリアを滑らせる）
         maxSpeed: 20,             // m/s (72 km/h) - 適度な最高速度
         reverseMultiplier: 0.8    // バックは少し弱め
     },

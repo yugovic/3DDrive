@@ -390,6 +390,18 @@ export class VehicleManager {
                 brakeForce = engineSpec.engineBrake || CONFIG.VEHICLE.engine.brakeForce;
                 logicalEngineForce = 0;
                 console.log(`[ブレーキ] 前進速度: ${forwardSpeed.toFixed(2)} m/s`);
+                
+                // ブレーキングドリフト: 高速でブレーキ＋ステアリング時にリアグリップを減少
+                if (currentSpeed > 8 && (inputActions.left || inputActions.right)) {
+                    // 後輪のfrictionSlipを一時的に下げる
+                    this.vehicle.wheelInfos[2].frictionSlip = 2; // 後左輪
+                    this.vehicle.wheelInfos[3].frictionSlip = 2; // 後右輪
+                    console.log('[ドリフト] ブレーキングドリフト開始');
+                } else {
+                    // 通常のグリップに戻す
+                    this.vehicle.wheelInfos[2].frictionSlip = CONFIG.VEHICLE.wheel.frictionSlip;
+                    this.vehicle.wheelInfos[3].frictionSlip = CONFIG.VEHICLE.wheel.frictionSlip;
+                }
             } else {
                 // 停止または後退中 → バック
                 isReversing = true;
@@ -398,6 +410,10 @@ export class VehicleManager {
                 brakeForce = 0;
                 console.log(`[後退] 論理エンジン力: ${logicalEngineForce}N`);
             }
+        } else {
+            // ブレーキを離したら通常のグリップに戻す
+            this.vehicle.wheelInfos[2].frictionSlip = CONFIG.VEHICLE.wheel.frictionSlip;
+            this.vehicle.wheelInfos[3].frictionSlip = CONFIG.VEHICLE.wheel.frictionSlip;
         }
         
         // RaycastVehicleの仕様に合わせて実際の力を計算
