@@ -7,6 +7,7 @@ class CannonDebugRenderer {
         this.scene = scene;
         this.world = world;
         this.meshes = [];
+        this.bodyMeshMap = new Map(); // ボディIDとメッシュの対応を保持
         this.material = new THREE.LineBasicMaterial({ 
             color: 0x00ff00,
             linewidth: 1,
@@ -16,19 +17,60 @@ class CannonDebugRenderer {
     }
 
     update() {
-        // 既存のデバッグメッシュをクリア
-        this.clear();
-
-        // 各物理ボディに対してワイヤーフレームを作成
+        // 現在のボディIDセットを作成
+        const currentBodyIds = new Set();
+        
+        // 各物理ボディに対してメッシュを更新または作成
         this.world.bodies.forEach(body => {
+            const bodyId = body.id;
+            currentBodyIds.add(bodyId);
+            
             body.shapes.forEach((shape, shapeIndex) => {
-                const mesh = this.createMeshForShape(shape, body, shapeIndex);
-                if (mesh) {
-                    this.scene.add(mesh);
-                    this.meshes.push(mesh);
+                const meshKey = `${bodyId}_${shapeIndex}`;
+                let meshData = this.bodyMeshMap.get(meshKey);
+                
+                if (meshData) {
+                    // 既存メッシュの位置と回転を更新
+                    this.updateMeshTransform(meshData.mesh, shape, body);
+                } else {
+                    // 新規メッシュを作成
+                    const mesh = this.createMeshForShape(shape, body, shapeIndex);
+                    if (mesh) {
+                        this.scene.add(mesh);
+                        this.meshes.push(mesh);
+                        this.bodyMeshMap.set(meshKey, { mesh, bodyId });
+                    }
                 }
             });
         });
+        
+        // 削除されたボディのメッシュを削除
+        const keysToDelete = [];
+        this.bodyMeshMap.forEach((meshData, key) => {
+            if (!currentBodyIds.has(meshData.bodyId)) {
+                this.scene.remove(meshData.mesh);
+                if (meshData.mesh.geometry) meshData.mesh.geometry.dispose();
+                const index = this.meshes.indexOf(meshData.mesh);
+                if (index > -1) this.meshes.splice(index, 1);
+                keysToDelete.push(key);
+            }
+        });
+        keysToDelete.forEach(key => this.bodyMeshMap.delete(key));
+    }
+    
+    updateMeshTransform(mesh, shape, body) {
+        const shapeWorldPos = new CANNON.Vec3();
+        const shapeWorldQuat = new CANNON.Quaternion();
+        body.pointToWorldFrame(shape.position || new CANNON.Vec3(), shapeWorldPos);
+        body.quaternion.mult(shape.orientation || new CANNON.Quaternion(), shapeWorldQuat);
+        
+        mesh.position.copy(shapeWorldPos);
+        mesh.quaternion.set(
+            shapeWorldQuat.x,
+            shapeWorldQuat.y,
+            shapeWorldQuat.z,
+            shapeWorldQuat.w
+        );
     }
 
     createMeshForShape(shape, body, shapeIndex) {
@@ -139,6 +181,7 @@ class CannonDebugRenderer {
             if (mesh.geometry) mesh.geometry.dispose();
         });
         this.meshes = [];
+        this.bodyMeshMap.clear();
     }
 
     dispose() {

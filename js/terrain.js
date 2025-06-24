@@ -801,7 +801,7 @@ export class TerrainManager {
                 // ビジュアルエフェクト
                 pad.mesh.children[0].material.emissiveIntensity = 1;
                 
-                console.log('[ブーストパッド] 発動！ ブースト方向:', boostDirection, '力:', pad.boostForce);
+                // デバッグログは削除（パフォーマンス向上のため）
             }
         });
     }
@@ -835,11 +835,7 @@ export class TerrainManager {
                               vehicleTopY >= sensorBottomY && 
                               vehicleTopY <= elevatorBottomY;
         
-        if (isInDangerZone && !elevator.safetyStop) {
-            console.warn('[エレベーター] 安全停止作動！車両を検出しました。');
-            console.log(`車両位置: X=${vehiclePos.x.toFixed(2)}, Y=${vehiclePos.y.toFixed(2)}, Z=${vehiclePos.z.toFixed(2)}`);
-            console.log(`エレベーター底面Y: ${elevatorBottomY.toFixed(2)}, センサー底Y: ${sensorBottomY.toFixed(2)}`);
-        }
+        // デバッグログは削除（パフォーマンス向上のため）
         
         return isInDangerZone;
     }
@@ -861,7 +857,7 @@ export class TerrainManager {
                 pad.cooldown = pad.maxCooldown;
                 pad.animationTime = 0.5;
                 
-                console.log('[ジャンプパッド] 発動！ Y速度:', vehicleBody.velocity.y.toFixed(2), 'm/s');
+                // デバッグログは削除（パフォーマンス向上のため）
             }
         });
     }
@@ -926,11 +922,7 @@ export class TerrainManager {
                     const platformTopY = elevator.body.position.y + (elevator.platformHeight ? elevator.platformHeight / 2 : 0.25);
                     const yDiff = vehicleBottomY - platformTopY;
                     
-                    // 車両が浮き上がっている場合に警告
-                    if (yDiff > 0.1) {
-                        console.warn(`[エレベーター] 車両が浮き上がっています: ${yDiff.toFixed(3)}m`);
-                        console.warn(`[エレベーター] メッシュY: ${elevator.mesh.position.y.toFixed(3)}m, ボディY: ${elevator.body.position.y.toFixed(3)}m`);
-                    }
+                    // デバッグログは削除（パフォーマンス向上のため）
                 }
             }
             
