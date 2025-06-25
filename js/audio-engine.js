@@ -712,7 +712,7 @@ class TireSound {
     }
     
     startScreech() {
-        if (this.screechSound) return;
+        if (this.screechSound) return this.screechSound.masterGain;
         
         const preset = AUDIO_PRESETS.tire.screech;
         const now = this.context.currentTime;

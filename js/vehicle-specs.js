@@ -18,8 +18,8 @@ export const VEHICLE_SPECS = {
         
         // 3Dモデル設定
         model: {
-            url: '/assets/Cars/rx7_sabana.glb',
-            fallbackUrl: '/assets/Cars/rx7_sabana.glb',
+            url: './assets/Cars/rx7_sabana.glb',
+            fallbackUrl: './assets/Cars/rx7_sabana.glb',
             scale: { x: 1.2, y: 1.2, z: 1.2 },
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: Math.PI, z: 0 }
@@ -127,8 +127,8 @@ export const VEHICLE_SPECS = {
         
         // 3Dモデル設定
         model: {
-            url: '/assets/Cars/r360_mazda.glb',
-            fallbackUrl: '/assets/Cars/r360_mazda.glb',
+            url: './assets/Cars/r360_mazda.glb',
+            fallbackUrl: './assets/Cars/r360_mazda.glb',
             scale: { x: 1.0, y: 1.0, z: 1.0 },
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: Math.PI, z: 0 }
