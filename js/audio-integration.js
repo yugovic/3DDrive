@@ -34,7 +34,7 @@ export class AudioIntegration {
         this.settings = {
             engineVolume: 0.7,
             effectsVolume: 0.8,
-            masterVolume: 0.8,
+            masterVolume: 0.4,  // 初期音量を半分に設定
             reverbAmount: 0.3
         };
         

@@ -806,7 +806,7 @@ export class AdvancedAudioManager {
         
         // マスターボリューム
         this.masterGain = this.context.createGain();
-        this.masterGain.gain.value = 0.7;
+        this.masterGain.gain.value = 0.35;  // 初期音量を半分に設定
         
         // エフェクトチェーンの作成
         this.createEffectsChain();
