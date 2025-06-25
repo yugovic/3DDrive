@@ -161,28 +161,28 @@ export const KEY_MAPPINGS = {
 export const CAR_MODELS = {
     rx7: {
         name: "RX-7 SABANA",
-        url: "/assets/Cars/rx7_sabana.glb",
-        fallbackUrl: "/assets/Cars/rx7_sabana.glb"
+        url: "./assets/Cars/rx7_sabana.glb",
+        fallbackUrl: "./assets/Cars/rx7_sabana.glb"
     },
     rx7race: {
         name: "RX-7 SABANA Race",
-        url: "/assets/Cars/rx7_sabana_race.glb"
+        url: "./assets/Cars/rx7_sabana_race.glb"
     },
     r360: {
         name: "R360 Coupe",
-        url: "/assets/Cars/r360_mazda.glb"
+        url: "./assets/Cars/r360_mazda.glb"
     },
     cosmo: {
         name: "Cosmo Sport",
-        url: "/assets/Cars/cosmosp.glb"
+        url: "./assets/Cars/cosmosp.glb"
     },
     rx3: {
         name: "RX-3 Race",
-        url: "/assets/Cars/RX3_race.glb"
+        url: "./assets/Cars/RX3_race.glb"
     },
     cosmorace: {
         name: "Cosmo Sport Race",
-        url: "/assets/Cars/cosmosp_race.glb"
+        url: "./assets/Cars/cosmosp_race.glb"
     }
 };
 
