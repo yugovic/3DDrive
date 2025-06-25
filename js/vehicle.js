@@ -19,7 +19,7 @@ export class VehicleManager {
         this.boundingBoxHelper = null;
         
         this.stabilizationEnabled = true;
-        this.showBoundingBox = true; // デフォルトで表示
+        this.showBoundingBox = false; // デフォルトで非表示
         this.heightOffset = 0; // デバッグ用の高さオフセット
         this.debugClearance = -0.15; // デバッグ用の車高調整値（タイヤを下げて地面に接地）
         this.modelYOffset = -0.2; // 3Dモデルの表示オフセット（コリジョンオフセットと同じ値）
